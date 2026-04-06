@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.1.0...v1.1.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* added clockSkewSeconds to options ([1683fe9](https://github.com/SourceRegistry/sveltekit-oidc/commit/1683fe9a4a1558e4fef21a02f0fedb88103336f0))
+
 # [1.1.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.0.4...v1.1.0) (2026-04-06)
 
 
