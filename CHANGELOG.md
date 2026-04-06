@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.0.0...v1.0.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* docs and packaging ([304c5b3](https://github.com/SourceRegistry/sveltekit-oidc/commit/304c5b3523067f27453abebc6758e70e4be19f92))
+
 # 1.0.0 (2026-04-06)
 
 
