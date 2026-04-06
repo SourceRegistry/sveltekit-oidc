@@ -1,6 +1,6 @@
 {
   "name": "@sourceregistry/sveltekit-oidc",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "OIDC authentication helpers for SvelteKit applications.",
   "license": "Apache-2.0",
   "scripts": {

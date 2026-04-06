@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.0.3...v1.0.4) (2026-04-06)
+
+
+### Bug Fixes
+
+* preserve discovered jwks uri ([5ccb576](https://github.com/SourceRegistry/sveltekit-oidc/commit/5ccb5763fa4b5049e395eabd5a2e671f70529540))
+
 ## [1.0.3](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.0.2...v1.0.3) (2026-04-06)
 
 
