@@ -30,6 +30,7 @@ import type {
 	OIDCLogoutOptions,
 	OIDCOptions,
 	OIDCInstance,
+	OIDCPersistedSession,
 	OIDCPublicSession,
 	OIDCSession,
 	OIDCSessionManagementConfig,
@@ -50,7 +51,7 @@ import {
 } from './utils.js';
 
 export type * from './types.js';
-export { createInMemoryBackChannelLogoutStore } from './store.js';
+export { createInMemoryBackChannelLogoutStore, createInMemorySessionStore } from './store.js';
 
 export function createOIDC(options: OIDCOptions): OIDCInstance {
 	const cookieOptions = buildCookieOptions(options.cookieOptions);
@@ -72,6 +73,60 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 
 	let metadataPromise: Promise<OIDCDiscoveryDocument> | undefined;
 	let jwksPromise: Promise<JWKSResolver> | undefined;
+
+	async function readPersistedSession(cookies: RequestEvent['cookies']): Promise<OIDCPersistedSession | null> {
+		if (!options.sessionStore) {
+			const session = cookieStore.readSession(cookies);
+			return session ? { session } : null;
+		}
+
+		const reference = cookieStore.readSessionReference(cookies);
+		if (!reference?.id) {
+			return null;
+		}
+
+		const session = await options.sessionStore.get(reference.id);
+		if (!session) {
+			cookieStore.clearSessionReference(cookies);
+			return null;
+		}
+
+		return {
+			id: reference.id,
+			session
+		};
+	}
+
+	async function writePersistedSession(
+		cookies: RequestEvent['cookies'],
+		session: OIDCSession,
+		sessionId?: string
+	): Promise<void> {
+		if (!options.sessionStore) {
+			cookieStore.writeSession(cookies, session);
+			return;
+		}
+
+		const id = sessionId ?? base64UrlEncode(randomBytes(24));
+		await options.sessionStore.set(id, session);
+		cookieStore.writeSessionReference(cookies, { id });
+	}
+
+	async function clearPersistedSession(
+		cookies: RequestEvent['cookies'],
+		sessionId?: string
+	): Promise<void> {
+		if (!options.sessionStore) {
+			cookieStore.clearSession(cookies);
+			return;
+		}
+
+		const id = sessionId ?? cookieStore.readSessionReference(cookies)?.id;
+		if (id) {
+			await options.sessionStore.delete(id);
+		}
+		cookieStore.clearSessionReference(cookies);
+	}
 
 	async function getMetadata() {
 		if (!metadataPromise) {
@@ -295,12 +350,13 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		return options.backChannelLogoutStore.isRevoked(session);
 	}
 
-	async function maybeRefreshSession(event: RequestEvent, session: OIDCSession | null) {
+	async function maybeRefreshSession(event: RequestEvent, persisted: OIDCPersistedSession | null) {
+		const session = persisted?.session ?? null;
 		if (!session) {
 			return null;
 		}
 		if (await isRevoked(session)) {
-			cookieStore.clearSession(event.cookies);
+			await clearPersistedSession(event.cookies, persisted?.id);
 			return null;
 		}
 		if (!shouldRefresh(session, refreshToleranceSeconds)) {
@@ -334,16 +390,16 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 						isRefresh: true
 					})
 				: nextSession;
-			cookieStore.writeSession(event.cookies, finalSession);
+			await writePersistedSession(event.cookies, finalSession, persisted?.id);
 			return finalSession;
 		} catch {
-			cookieStore.clearSession(event.cookies);
+			await clearPersistedSession(event.cookies, persisted?.id);
 			return null;
 		}
 	}
 
 	async function getSession(event: RequestEvent) {
-		return maybeRefreshSession(event, cookieStore.readSession(event.cookies));
+		return maybeRefreshSession(event, await readPersistedSession(event.cookies));
 	}
 
 	async function signIn(event: RequestEvent, loginOptions: OIDCLoginOptions = {}): Promise<never> {
@@ -445,7 +501,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 				})
 			: session;
 
-		cookieStore.writeSession(event.cookies, finalSession);
+		await writePersistedSession(event.cookies, finalSession);
 
 		return {
 			session: finalSession,
@@ -455,9 +511,10 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 
 	async function signOut(event: RequestEvent, logoutOptions: OIDCLogoutOptions = {}): Promise<never> {
 		const metadata = await getMetadata();
-		const session = cookieStore.readSession(event.cookies);
+		const persisted = await readPersistedSession(event.cookies);
+		const session = persisted?.session ?? null;
 		cookieStore.clearState(event.cookies);
-		cookieStore.clearSession(event.cookies);
+		await clearPersistedSession(event.cookies, persisted?.id);
 
 		if (logoutOptions.clearSessionOnly || !metadata.end_session_endpoint) {
 			throw redirect(
@@ -520,8 +577,8 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		return new Response(null, { status: 200 });
 	}
 
-	function requireAuth(event: RequestEvent, returnTo?: string) {
-		const session = cookieStore.readSession(event.cookies);
+	async function requireAuth(event: RequestEvent, returnTo?: string) {
+		const session = await getSession(event);
 		if (session) {
 			return session;
 		}
@@ -541,12 +598,13 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 			session,
 			user: session?.user,
 			claims: session?.claims,
-			requireAuth: () => {
+			requireAuth: async () => {
 				if (!session) {
 					throw error(401, { message: 'Authentication required' });
 				}
+				return session;
 			},
-			clearSession: () => cookieStore.clearSession(event.cookies)
+			clearSession: async () => clearPersistedSession(event.cookies)
 		};
 
 		return resolve(event);
@@ -658,7 +716,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		backChannelLogoutHandler,
 		createActions,
 		requireAuth,
-		clearSession: cookieStore.clearSession
+		clearSession: async (cookies) => clearPersistedSession(cookies)
 	};
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createInMemoryBackChannelLogoutStore } from './store.js';
+import { createInMemoryBackChannelLogoutStore, createInMemorySessionStore } from './store.js';
 
 describe('createInMemoryBackChannelLogoutStore', () => {
 	it('revokes by sid', async () => {
@@ -57,5 +57,30 @@ describe('createInMemoryBackChannelLogoutStore', () => {
 				refreshedAt: 0
 			})
 		).resolves.toBe(true);
+	});
+});
+
+describe('createInMemorySessionStore', () => {
+	it('roundtrips sessions by id', async () => {
+		const store = createInMemorySessionStore();
+		const session = {
+			issuer: 'https://issuer.example',
+			clientId: 'client',
+			sub: 'user-1',
+			groups: ['admin'],
+			tokens: {
+				accessToken: 'access',
+				tokenType: 'Bearer',
+				scope: ['openid']
+			},
+			createdAt: 0,
+			refreshedAt: 0
+		};
+
+		await store.set('session-1', session);
+		await expect(store.get('session-1')).resolves.toEqual(session);
+
+		await store.delete('session-1');
+		await expect(store.get('session-1')).resolves.toBeNull();
 	});
 });

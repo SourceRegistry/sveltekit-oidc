@@ -17,6 +17,15 @@ export function createOIDCCookieStore(
 		clearSession(cookies) {
 			cookies.delete(sessionCookieName, cookieOptions);
 		},
+		readSessionReference(cookies) {
+			return parseSignedCookie(cookies.get(sessionCookieName), cookieSecret);
+		},
+		writeSessionReference(cookies, reference) {
+			cookies.set(sessionCookieName, serializeSignedCookie(reference, cookieSecret), cookieOptions);
+		},
+		clearSessionReference(cookies) {
+			cookies.delete(sessionCookieName, cookieOptions);
+		},
 		readState(cookies) {
 			return parseSignedCookie(cookies.get(stateCookieName), cookieSecret);
 		},

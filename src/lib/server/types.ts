@@ -153,6 +153,12 @@ export type OIDCBackChannelLogoutStore = {
 	isRevoked(session: OIDCSession): MaybePromise<boolean>;
 };
 
+export type OIDCSessionStore = {
+	get(sessionId: string): MaybePromise<OIDCSession | null>;
+	set(sessionId: string, session: OIDCSession): MaybePromise<void>;
+	delete(sessionId: string): MaybePromise<void>;
+};
+
 export type OIDCSessionManagementConfig = {
 	clientId: string;
 	loginPath: string;
@@ -192,6 +198,7 @@ export type OIDCOptions = {
 	refreshToleranceSeconds?: number;
 	defaultLoginRedirect?: string;
 	defaultLogoutRedirect?: string;
+	sessionStore?: OIDCSessionStore;
 	backChannelLogoutStore?: OIDCBackChannelLogoutStore;
 	transformClaims?: (claims: OIDCUserClaims) => MaybePromise<OIDCUserClaims>;
 	transformUser?: (
@@ -234,8 +241,8 @@ export type OIDCHandleLocals = {
 	session: OIDCSession | null;
 	user?: OIDCUserClaims;
 	claims?: OIDCUserClaims;
-	requireAuth: () => void;
-	clearSession: () => void;
+	requireAuth: () => Promise<OIDCSession>;
+	clearSession: () => Promise<void>;
 };
 
 export type OIDCStateCookie = {
@@ -267,9 +274,17 @@ export type OIDCCookies = {
 	readSession(cookies: Cookies): OIDCSession | null;
 	writeSession(cookies: Cookies, session: OIDCSession): void;
 	clearSession(cookies: Cookies): void;
+	readSessionReference(cookies: Cookies): { id: string } | null;
+	writeSessionReference(cookies: Cookies, reference: { id: string }): void;
+	clearSessionReference(cookies: Cookies): void;
 	readState(cookies: Cookies): OIDCStateCookie | null;
 	writeState(cookies: Cookies, state: OIDCStateCookie): void;
 	clearState(cookies: Cookies): void;
+};
+
+export type OIDCPersistedSession = {
+	id?: string;
+	session: OIDCSession;
 };
 
 export type OIDCInstance = {
@@ -290,6 +305,6 @@ export type OIDCInstance = {
 		login: Action;
 		logout: Action;
 	}>;
-	requireAuth: (event: RequestEvent, returnTo?: string) => OIDCSession;
-	clearSession: (cookies: Cookies) => void;
+	requireAuth: (event: RequestEvent, returnTo?: string) => Promise<OIDCSession>;
+	clearSession: (cookies: Cookies) => Promise<void>;
 };
