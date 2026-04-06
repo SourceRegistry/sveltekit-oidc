@@ -55,6 +55,7 @@ export { createInMemoryBackChannelLogoutStore, createInMemorySessionStore } from
 
 export function createOIDC(options: OIDCOptions): OIDCInstance {
 	const cookieOptions = buildCookieOptions(options.cookieOptions);
+	const clockSkewSeconds = options.clockSkewSeconds ?? 30;
 	const refreshToleranceSeconds = options.refreshToleranceSeconds ?? 30;
 	const sessionCookieName = options.sessionCookieName ?? 'oidc_session';
 	const stateCookieName = options.stateCookieName ?? 'oidc_auth_state';
@@ -179,6 +180,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 			issuer: string;
 			audience: string;
 			algorithms?: SupportedAlgorithm[];
+			clockSkew?: number;
 		}
 	): Promise<T> {
 		let decoded: JSONWebToken;
@@ -300,7 +302,8 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		const claims = await verifyJwtWithJwks<OIDCUserClaims>(idToken, {
 			issuer: metadata.issuer,
 			audience: options.clientId,
-			algorithms: metadata.id_token_signing_alg_values_supported as SupportedAlgorithm[] | undefined
+			algorithms: metadata.id_token_signing_alg_values_supported as SupportedAlgorithm[] | undefined,
+			clockSkew: clockSkewSeconds
 		});
 		const transformedClaims = options.transformClaims ? await options.transformClaims(claims) : claims;
 		if (transformedClaims.nonce !== nonce) {
@@ -314,7 +317,8 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		const metadata = await getMetadata();
 		const claims = await verifyJwtWithJwks<OIDCBackChannelLogoutClaims>(logoutToken, {
 			issuer: metadata.issuer,
-			audience: options.clientId
+			audience: options.clientId,
+			clockSkew: clockSkewSeconds
 		});
 		if (!claims.events?.['http://schemas.openid.net/event/backchannel-logout']) {
 			throw error(400, { message: 'Invalid logout_token events claim' });

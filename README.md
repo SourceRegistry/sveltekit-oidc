@@ -33,6 +33,7 @@ export const oidc = createOIDC({
 	loginPath: '/auth/login',
 	redirectPath: '/auth/callback',
 	scope: ['openid', 'profile', 'email', 'offline_access'],
+	clockSkewSeconds: 30,
 	fetchUserInfo: true,
 	backChannelLogoutStore: createInMemoryBackChannelLogoutStore(),
 	transformSession(session) {
@@ -175,6 +176,7 @@ Set these environment variables to enable it:
 ## Notes
 
 - `cookieSecret` should be a strong random secret and must stay stable across instances.
+- `clockSkewSeconds` defaults to `30` and tolerates small clock drift between your app and the identity provider.
 - `createInMemoryBackChannelLogoutStore()` is suitable for local development or single-instance deployments. Use Redis, SQL, or another shared store for production.
 - The library validates `id_token` and `logout_token` values through `@sourceregistry/node-jwt` and provider JWKS metadata.
 - `groups` are normalized onto the session from `groups` and `roles` claims when present.

@@ -195,6 +195,7 @@ export type OIDCOptions = {
 	stateCookieName?: string;
 	cookieSecret: string;
 	cookieOptions?: Partial<CookieOptions>;
+	clockSkewSeconds?: number;
 	refreshToleranceSeconds?: number;
 	defaultLoginRedirect?: string;
 	defaultLogoutRedirect?: string;
