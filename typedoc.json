@@ -1,0 +1,18 @@
+{
+	"$schema": "https://typedoc.org/schema.json",
+	"entryPoints": [
+		"src/lib/server/index.ts"
+	],
+	"entryPointStrategy": "resolve",
+	"tsconfig": "tsconfig.typedoc.json",
+	"out": "docs",
+	"exclude": [
+		"**/*.test.ts",
+		"src/lib/demo/**"
+	],
+	"excludePrivate": true,
+	"excludeProtected": true,
+	"includeVersion": true,
+	"readme": "README.md",
+	"name": "sveltekit-oidc"
+}

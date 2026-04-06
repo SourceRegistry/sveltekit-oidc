@@ -1,0 +1,111 @@
+{
+	"name": "sveltekit-oidc",
+	"version": "0.0.1",
+	"description": "OIDC authentication helpers for SvelteKit applications.",
+	"license": "Apache-2.0",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build && npm run prepack",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"prepack": "svelte-kit sync && svelte-package && publint",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "vitest run",
+		"docs:build": "typedoc --options typedoc.json"
+	},
+	"files": [
+		"dist",
+		"!dist/demo/**",
+		"!dist/**/*.test.*",
+		"!dist/**/*.spec.*"
+	],
+	"sideEffects": [
+		"**/*.css"
+	],
+	"author": "A.P.A. Slaa (a.p.a.slaa@projectsource.nl)",
+	"bugs": {
+		"url": "https://github.com/SourceRegistry/sveltekit-oidc/issues"
+	},
+	"homepage": "https://sourceregistry.github.io/sveltekit-oidc/",
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/SourceRegistry/sveltekit-oidc.git"
+	},
+	"svelte": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"svelte": "./dist/index.js"
+		},
+		"./client": {
+			"types": "./dist/client/index.d.ts",
+			"svelte": "./dist/client/index.js"
+		},
+		"./server": {
+			"types": "./dist/server/index.d.ts",
+			"default": "./dist/server/index.js"
+		}
+	},
+	"peerDependencies": {
+		"@sveltejs/kit": "^2.50.2",
+		"svelte": "^5.0.0"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-auto": "^7.0.0",
+		"@sveltejs/kit": "^2.50.2",
+		"@sveltejs/package": "^2.5.7",
+		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@types/node": "^25.5.2",
+		"@semantic-release/changelog": "^6.0.3",
+		"@semantic-release/git": "^10.0.1",
+		"publint": "^0.3.17",
+		"svelte": "^5.54.0",
+		"svelte-check": "^4.4.2",
+		"typescript": "^5.9.3",
+		"vite": "^7.3.1",
+		"vitest": "^4.1.2",
+		"@sourceregistry/semantic-release-jsr": "^1.0.1",
+		"typedoc": "^0.28.18"
+	},
+	"keywords": [
+		"sveltekit",
+		"svelte",
+		"oidc",
+		"openid-connect",
+		"authentication",
+		"oauth"
+	],
+	"dependencies": {
+		"@sourceregistry/node-jwt": "^1.5.9"
+	},
+	"release": {
+		"branches": [
+			"main"
+		],
+		"plugins": [
+			"@semantic-release/commit-analyzer",
+			"@semantic-release/release-notes-generator",
+			"@semantic-release/changelog",
+			"@semantic-release/npm",
+			"@sourceregistry/semantic-release-jsr",
+			[
+				"@semantic-release/git",
+				{
+					"assets": [
+						"package.json",
+						"package-lock.json",
+						"jsr.json",
+						"CHANGELOG.md"
+					],
+					"message": "sveltekit-oidc(release): v${nextRelease.version}\n\n${nextRelease.notes}"
+				}
+			]
+		]
+	}
+}

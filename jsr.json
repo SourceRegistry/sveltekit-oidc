@@ -1,0 +1,22 @@
+{
+  "$schema": "https://jsr.io/schema/config-file.v1.json",
+  "name": "@sourceregistry/sveltekit-oidc",
+  "version": "0.0.1",
+  "exports": {
+    ".": "./src/lib/jsr.ts",
+    "./server": "./src/lib/server/index.ts",
+    "./client": "./src/lib/client/context.ts"
+  },
+  "publish": {
+    "include": [
+      "src/lib/jsr.ts",
+      "src/lib/server/**/*.ts",
+      "src/lib/client/**/*.ts",
+      "README.md",
+      "LICENSE"
+    ],
+    "exclude": [
+      "src/**/*.test.ts"
+    ]
+  }
+}

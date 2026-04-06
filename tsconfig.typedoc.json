@@ -1,0 +1,14 @@
+{
+	"extends": "./tsconfig.json",
+	"include": [
+		"src/lib/server/**/*.ts"
+	],
+	"exclude": [
+		"src/**/*.test.ts",
+		"src/lib/demo/**",
+		"src/routes/**",
+		"src/hooks.server.ts",
+		".svelte-kit/**",
+		"dist/**"
+	]
+}
