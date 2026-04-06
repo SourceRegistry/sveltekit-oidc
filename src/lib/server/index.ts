@@ -111,7 +111,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 					throw error(500, { message: 'OIDC jwks_uri is required to validate id_token values' });
 				}
 
-				return fromWeb(metadata.jwks_uri);
+				return fromWeb(metadata.jwks_uri, { overrideEndpointCheck: true });
 			});
 		}
 
