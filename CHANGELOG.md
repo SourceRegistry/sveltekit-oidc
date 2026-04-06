@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.0.2...v1.0.3) (2026-04-06)
+
+
+### Bug Fixes
+
+* packaging scope ([a881ae6](https://github.com/SourceRegistry/sveltekit-oidc/commit/a881ae69c0addbd689289810fed158986c315c99))
+
 ## [1.0.2](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.0.1...v1.0.2) (2026-04-06)
 
 
