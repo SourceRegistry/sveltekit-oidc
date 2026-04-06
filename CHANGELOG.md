@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.0.4...v1.1.0) (2026-04-06)
+
+
+### Features
+
+* add server-backed session storage ([c5f1d46](https://github.com/SourceRegistry/sveltekit-oidc/commit/c5f1d465669f7a829e3ffb4a1ce34e4af1d41b6a))
+
 ## [1.0.4](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.0.3...v1.0.4) (2026-04-06)
 
 
