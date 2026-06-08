@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.1.1...v1.2.0) (2026-06-08)
+
+
+### Features
+
+* generic TClaims for typed custom OIDC claims end-to-end ([ec68e75](https://github.com/SourceRegistry/sveltekit-oidc/commit/ec68e753f80849e01016056ad283701614624b37))
+
 ## [1.1.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.1.0...v1.1.1) (2026-04-06)
 
 
