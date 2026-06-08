@@ -57,22 +57,22 @@
     "svelte": "^5.0.0"
   },
   "devDependencies": {
-    "@sveltejs/adapter-auto": "^7.0.0",
-    "@sveltejs/kit": "^2.50.2",
-    "@sveltejs/package": "^2.5.7",
-    "@sveltejs/vite-plugin-svelte": "^6.2.4",
-    "@types/node": "^25.5.2",
+    "@sveltejs/adapter-auto": "^7.0.1",
+    "@sveltejs/kit": "^2.63.1",
+    "@sveltejs/package": "^2.5.8",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@types/node": "^25.9.2",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
-    "publint": "^0.3.17",
-    "svelte": "^5.54.0",
-    "svelte-check": "^4.4.2",
-    "typescript": "^5.9.3",
-    "vite": "^7.3.1",
-    "@vitest/coverage-v8": "^4.1.2",
-    "vitest": "^4.1.2",
-    "@sourceregistry/semantic-release-jsr": "^1.0.1",
-    "typedoc": "^0.28.18"
+    "publint": "^0.3.21",
+    "svelte": "^5.56.3",
+    "svelte-check": "^4.6.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "@vitest/coverage-v8": "^4.1.8",
+    "vitest": "^4.1.8",
+    "@sourceregistry/semantic-release-jsr": "^1.1.1",
+    "typedoc": "^0.28.19"
   },
   "keywords": [
     "sveltekit",
@@ -83,7 +83,7 @@
     "oauth"
   ],
   "dependencies": {
-    "@sourceregistry/node-jwt": "^1.5.9"
+    "@sourceregistry/node-jwt": "^1.5.10"
   },
   "release": {
     "branches": [
