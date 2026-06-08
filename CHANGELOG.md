@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.2.0...v1.3.0) (2026-06-08)
+
+
+### Features
+
+* generic TSession for typed custom OIDC sessions end-to-end ([ed8c756](https://github.com/SourceRegistry/sveltekit-oidc/commit/ed8c7565526c1797a7ff824cbcc7ad8030e84f9a))
+
 # [1.2.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.1.1...v1.2.0) (2026-06-08)
 
 
