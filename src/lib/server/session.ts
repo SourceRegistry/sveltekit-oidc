@@ -1,4 +1,4 @@
-import type { OIDCSession, OIDCSessionTokens, OIDCTokenResponse } from './types.js';
+import type { OIDCSession, OIDCSessionTokens, OIDCTokenResponse, OIDCUserClaims } from './types.js';
 
 export function normalizeTokens(
 	tokenResponse: OIDCTokenResponse,
@@ -19,8 +19,8 @@ export function normalizeTokens(
 	};
 }
 
-export function shouldRefresh(
-	session: OIDCSession,
+export function shouldRefresh<TClaims extends OIDCUserClaims = OIDCUserClaims>(
+	session: OIDCSession<TClaims>,
 	refreshToleranceSeconds: number,
 	now = Math.floor(Date.now() / 1000)
 ) {

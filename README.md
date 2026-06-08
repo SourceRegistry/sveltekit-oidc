@@ -160,6 +160,76 @@ export async function load(event) {
 - periodic `invalidateAll()` revalidation so revoked server sessions are detected
 - a client context for nested auth-aware components through `useOIDC()` / `getOIDCContext()`
 
+## Typed Custom Claims
+
+`createOIDC` infers a `TClaims` type from whatever `transformClaims` / `transformUser` / `transformSession` return, and threads it through the session, `event.locals.oidc`, `OIDCPublicSession`, and the client context — no casts needed.
+
+```ts
+// src/lib/server/auth.ts
+export const oidc = createOIDC({
+	issuer: 'https://your-idp.example.com',
+	clientId: process.env.OIDC_CLIENT_ID!,
+	cookieSecret: process.env.OIDC_COOKIE_SECRET!,
+	transformClaims: (claims) => ({
+		...claims,
+		roles: (claims.roles as string[]) ?? [],
+		tenant: claims.tenant as string | undefined
+	})
+});
+```
+
+Extract the inferred type with `OIDCInferClaims` and apply it to `App.Locals` so `event.locals.oidc` is typed everywhere:
+
+```ts
+// src/app.d.ts
+import type { OIDCHandleLocals, OIDCInferClaims } from 'sveltekit-oidc/server';
+import { oidc } from '$lib/server/auth';
+
+export type AppClaims = OIDCInferClaims<typeof oidc>;
+
+declare global {
+	namespace App {
+		interface Locals {
+			oidc?: OIDCHandleLocals<AppClaims>;
+		}
+	}
+}
+
+export {};
+```
+
+Now `event.locals.oidc?.claims?.roles` is `string[]` and `?.tenant` is `string | undefined` in every hook, load function, and action.
+
+`OIDCContext` is a generic component, but Svelte doesn't support passing explicit type arguments in markup — `TClaims` is inferred from the `session` prop instead. Since `data.session` comes from `oidc.getPublicSession(event)`, it's already typed `OIDCPublicSession<AppClaims> | null`, so the inference flows through automatically:
+
+```html
+<!-- src/routes/+layout.svelte -->
+<script lang="ts">
+	import { OIDCContext } from 'sveltekit-oidc';
+	let { data, children } = $props();
+</script>
+
+<OIDCContext session={data.session} config={data.sessionManagement}>
+	{@render children()}
+</OIDCContext>
+```
+
+```html
+<!-- src/lib/Account.svelte -->
+<script lang="ts">
+	import { useOIDC } from 'sveltekit-oidc';
+	import type { AppClaims } from '../../app.d.ts';
+
+	const oidc = useOIDC<AppClaims>();
+</script>
+
+{#if oidc.isAuthenticated}
+	<p>Roles: {oidc.claims?.roles.join(', ')}</p>
+{/if}
+```
+
+If `transformClaims` (and friends) are omitted, `TClaims` defaults to `OIDCUserClaims` — existing setups keep working unchanged.
+
 ## Example App
 
 This repository now includes a runnable example under [src/routes](C:/Users/alexa/WebstormProjects/github.com/SourceRegistry/sveltekit-oidc/src/routes) and [src/hooks.server.ts](C:/Users/alexa/WebstormProjects/github.com/SourceRegistry/sveltekit-oidc/src/hooks.server.ts).
@@ -183,4 +253,4 @@ Set these environment variables to enable it:
 - Use `transformClaims`, `transformUser`, and `transformSession` to project provider-specific claims into your own session shape.
 - `check_session_iframe` monitoring only runs when the provider advertises that endpoint and the session includes `session_state`.
 - Refresh token handling is automatic when a valid refresh token is present.
-- `event.locals.oidc` is attached by the hook, but you should add your own `app.d.ts` augmentation in the consuming app for full typing.
+- `event.locals.oidc` is attached by the hook and typed via `OIDCHandleLocals<TClaims>`; see [Typed Custom Claims](#typed-custom-claims) for wiring your own claim shapes through `app.d.ts`.

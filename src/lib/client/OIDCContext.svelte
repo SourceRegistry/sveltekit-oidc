@@ -1,9 +1,13 @@
-<script lang="ts">
+<script lang="ts" generics="TClaims extends OIDCUserClaims = OIDCUserClaims">
 	import { goto, invalidateAll } from '$app/navigation';
 	import type { Snippet } from 'svelte';
 
 	import { setOIDCContext } from './context.js';
-	import type { OIDCPublicSession, OIDCSessionManagementConfig } from '../server/index.js';
+	import type {
+		OIDCPublicSession,
+		OIDCSessionManagementConfig,
+		OIDCUserClaims
+	} from '../server/index.js';
 
 	type RedirectMode = 'login' | 'logout' | 'reload' | 'none';
 
@@ -19,7 +23,7 @@
 		redirectIfUnauthenticated = false,
 		children
 	}: {
-		session?: OIDCPublicSession | null;
+		session?: OIDCPublicSession<TClaims> | null;
 		config: OIDCSessionManagementConfig;
 		loginPath?: string;
 		logoutPath?: string;
@@ -44,7 +48,7 @@
 		Boolean(session?.isAuthenticated && session?.sessionState && iframeUrl)
 	);
 
-	const context = setOIDCContext({
+	const context = setOIDCContext<TClaims>({
 		get isAuthenticated() {
 			return Boolean(session?.isAuthenticated);
 		},

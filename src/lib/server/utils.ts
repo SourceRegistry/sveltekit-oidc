@@ -35,7 +35,9 @@ export function normalizeStringArray(value: unknown): string[] {
 	return [];
 }
 
-export function collectGroups(...sources: Array<OIDCUserClaims | undefined>) {
+export function collectGroups<TClaims extends OIDCUserClaims = OIDCUserClaims>(
+	...sources: Array<TClaims | undefined>
+) {
 	return [
 		...new Set(
 			sources.flatMap((source) =>
@@ -107,7 +109,9 @@ export function absoluteUrl(event: RequestEvent, pathOrUrl: string) {
 	return new URL(pathOrUrl, event.url).toString();
 }
 
-export function toPublicSession(session: OIDCSession | null): OIDCPublicSession | null {
+export function toPublicSession<TClaims extends OIDCUserClaims = OIDCUserClaims>(
+	session: OIDCSession<TClaims> | null
+): OIDCPublicSession<TClaims> | null {
 	if (!session) return null;
 
 	return {

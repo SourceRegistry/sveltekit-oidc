@@ -53,7 +53,9 @@ import {
 export type * from './types.js';
 export { createInMemoryBackChannelLogoutStore, createInMemorySessionStore } from './store.js';
 
-export function createOIDC(options: OIDCOptions): OIDCInstance {
+export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
+	options: OIDCOptions<TClaims>
+): OIDCInstance<TClaims> {
 	const cookieOptions = buildCookieOptions(options.cookieOptions);
 	const clockSkewSeconds = options.clockSkewSeconds ?? 30;
 	const refreshToleranceSeconds = options.refreshToleranceSeconds ?? 30;
@@ -65,7 +67,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 	const clientAuthMethod: OIDCClientAuthMethod =
 		options.clientAuthMethod ?? (options.clientSecret ? 'client_secret_basic' : 'none');
 
-	const cookieStore = createOIDCCookieStore(
+	const cookieStore = createOIDCCookieStore<TClaims>(
 		options.cookieSecret,
 		sessionCookieName,
 		stateCookieName,
@@ -75,7 +77,9 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 	let metadataPromise: Promise<OIDCDiscoveryDocument> | undefined;
 	let jwksPromise: Promise<JWKSResolver> | undefined;
 
-	async function readPersistedSession(cookies: RequestEvent['cookies']): Promise<OIDCPersistedSession | null> {
+	async function readPersistedSession(
+		cookies: RequestEvent['cookies']
+	): Promise<OIDCPersistedSession<TClaims> | null> {
 		if (!options.sessionStore) {
 			const session = cookieStore.readSession(cookies);
 			return session ? { session } : null;
@@ -100,7 +104,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 
 	async function writePersistedSession(
 		cookies: RequestEvent['cookies'],
-		session: OIDCSession,
+		session: OIDCSession<TClaims>,
 		sessionId?: string
 	): Promise<void> {
 		if (!options.sessionStore) {
@@ -305,7 +309,9 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 			algorithms: metadata.id_token_signing_alg_values_supported as SupportedAlgorithm[] | undefined,
 			clockSkew: clockSkewSeconds
 		});
-		const transformedClaims = options.transformClaims ? await options.transformClaims(claims) : claims;
+		const transformedClaims = options.transformClaims
+			? await options.transformClaims(claims)
+			: (claims as TClaims);
 		if (transformedClaims.nonce !== nonce) {
 			throw error(401, { message: 'Invalid id_token nonce' });
 		}
@@ -346,7 +352,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		});
 	}
 
-	async function isRevoked(session: OIDCSession | null) {
+	async function isRevoked(session: OIDCSession<TClaims> | null) {
 		if (!session || !options.backChannelLogoutStore) {
 			return false;
 		}
@@ -354,7 +360,10 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		return options.backChannelLogoutStore.isRevoked(session);
 	}
 
-	async function maybeRefreshSession(event: RequestEvent, persisted: OIDCPersistedSession | null) {
+	async function maybeRefreshSession(
+		event: RequestEvent,
+		persisted: OIDCPersistedSession<TClaims> | null
+	) {
 		const session = persisted?.session ?? null;
 		if (!session) {
 			return null;
@@ -374,8 +383,10 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 				: session.claims;
 			const rawUser =
 				options.fetchUserInfo !== false ? await fetchUserInfo(tokenResponse.access_token) : session.user;
-			const user = options.transformUser ? await options.transformUser(rawUser, { claims }) : rawUser;
-			const nextSession: OIDCSession = {
+			const user = options.transformUser
+				? await options.transformUser(rawUser, { claims })
+				: (rawUser as TClaims | undefined);
+			const nextSession: OIDCSession<TClaims> = {
 				...session,
 				sub: claims?.sub ?? session.sub,
 				sid: claims?.sid ?? session.sid,
@@ -448,7 +459,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		throw redirect(302, authorizationUrl.toString());
 	}
 
-	async function handleCallback(event: RequestEvent): Promise<OIDCCallbackResult> {
+	async function handleCallback(event: RequestEvent): Promise<OIDCCallbackResult<TClaims>> {
 		const providerError = parseProviderError(event);
 		if (providerError) {
 			throw providerError;
@@ -478,10 +489,12 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 			options.fetchUserInfo === false
 				? undefined
 				: await fetchUserInfo(tokenResponse.access_token).catch(() => undefined);
-		const user = options.transformUser ? await options.transformUser(rawUser, { claims }) : rawUser;
+		const user = options.transformUser
+			? await options.transformUser(rawUser, { claims })
+			: (rawUser as TClaims | undefined);
 		const metadata = await getMetadata();
 		const now = Math.floor(Date.now() / 1000);
-		const session: OIDCSession = {
+		const session: OIDCSession<TClaims> = {
 			issuer: metadata.issuer,
 			clientId: options.clientId,
 			nonce: stateCookie.nonce,
@@ -597,7 +610,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 
 	const handle: Handle = async ({ event, resolve }) => {
 		const session = await getSession(event);
-		(event.locals as { oidc?: OIDCHandleLocals }).oidc = {
+		(event.locals as { oidc?: OIDCHandleLocals<TClaims> }).oidc = {
 			isAuthenticated: Boolean(session),
 			session,
 			user: session?.user,
@@ -621,7 +634,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		};
 	}
 
-	function callbackHandler(handlerOptions: OIDCCallbackHandlerOptions = {}): RequestHandler {
+	function callbackHandler(handlerOptions: OIDCCallbackHandlerOptions<TClaims> = {}): RequestHandler {
 		return async (event) => {
 			try {
 				const result = await handleCallback(event);
@@ -707,7 +720,7 @@ export function createOIDC(options: OIDCOptions): OIDCInstance {
 		handle,
 		getMetadata,
 		getSession,
-		getPublicSession: async (event: RequestEvent): Promise<OIDCPublicSession | null> =>
+		getPublicSession: async (event: RequestEvent): Promise<OIDCPublicSession<TClaims> | null> =>
 			toPublicSession(await getSession(event)),
 		getSessionManagementConfig,
 		login: signIn,

@@ -1,13 +1,13 @@
 import { getContext, hasContext, setContext } from 'svelte';
 
-import type { OIDCDiscoveryDocument, OIDCPublicSession } from '../server/index.js';
+import type { OIDCDiscoveryDocument, OIDCPublicSession, OIDCUserClaims } from '../server/index.js';
 
-export type OIDCClientContextValue = {
+export type OIDCClientContextValue<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
 	isAuthenticated: boolean;
-	session: OIDCPublicSession | null;
-	user: OIDCPublicSession['user'];
-	claims: OIDCPublicSession['claims'];
-	groups: OIDCPublicSession['groups'];
+	session: OIDCPublicSession<TClaims> | null;
+	user: OIDCPublicSession<TClaims>['user'];
+	claims: OIDCPublicSession<TClaims>['claims'];
+	groups: OIDCPublicSession<TClaims>['groups'];
 	metadata?: Pick<
 		OIDCDiscoveryDocument,
 		| 'issuer'
@@ -24,19 +24,21 @@ export type OIDCClientContextValue = {
 
 const OIDC_CONTEXT_KEY = Symbol('sveltekit-oidc-context');
 
-export function setOIDCContext(value: OIDCClientContextValue): OIDCClientContextValue {
+export function setOIDCContext<TClaims extends OIDCUserClaims = OIDCUserClaims>(
+	value: OIDCClientContextValue<TClaims>
+): OIDCClientContextValue<TClaims> {
 	setContext(OIDC_CONTEXT_KEY, value);
 	return value;
 }
 
-export function getOIDCContext(): OIDCClientContextValue {
-	return getContext<OIDCClientContextValue>(OIDC_CONTEXT_KEY);
+export function getOIDCContext<TClaims extends OIDCUserClaims = OIDCUserClaims>(): OIDCClientContextValue<TClaims> {
+	return getContext<OIDCClientContextValue<TClaims>>(OIDC_CONTEXT_KEY);
 }
 
-export function useOIDC(): OIDCClientContextValue {
+export function useOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(): OIDCClientContextValue<TClaims> {
 	if (!hasContext(OIDC_CONTEXT_KEY)) {
 		throw new Error('OIDC context is not available. Wrap this component tree with <OIDCContext>.');
 	}
 
-	return getOIDCContext();
+	return getOIDCContext<TClaims>();
 }

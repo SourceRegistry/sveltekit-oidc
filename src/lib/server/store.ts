@@ -1,6 +1,8 @@
-import type { OIDCBackChannelLogoutStore, OIDCSessionStore } from './types.js';
+import type { OIDCBackChannelLogoutStore, OIDCSessionStore, OIDCUserClaims } from './types.js';
 
-export function createInMemoryBackChannelLogoutStore(): OIDCBackChannelLogoutStore {
+export function createInMemoryBackChannelLogoutStore<
+	TClaims extends OIDCUserClaims = OIDCUserClaims
+>(): OIDCBackChannelLogoutStore<TClaims> {
 	const revokedBySid = new Set<string>();
 	const revokedBySub = new Set<string>();
 
@@ -22,8 +24,10 @@ export function createInMemoryBackChannelLogoutStore(): OIDCBackChannelLogoutSto
 	};
 }
 
-export function createInMemorySessionStore(): OIDCSessionStore {
-	const sessions = new Map<string, Parameters<OIDCSessionStore['set']>[1]>();
+export function createInMemorySessionStore<
+	TClaims extends OIDCUserClaims = OIDCUserClaims
+>(): OIDCSessionStore<TClaims> {
+	const sessions = new Map<string, Parameters<OIDCSessionStore<TClaims>['set']>[1]>();
 
 	return {
 		async get(sessionId) {
