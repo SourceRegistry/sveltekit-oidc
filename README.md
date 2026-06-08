@@ -230,6 +230,57 @@ Now `event.locals.oidc?.claims?.roles` is `string[]` and `?.tenant` is `string |
 
 If `transformClaims` (and friends) are omitted, `TClaims` defaults to `OIDCUserClaims` — existing setups keep working unchanged.
 
+## Typed Custom Session
+
+Backend apps commonly stash application-specific data on the session itself (e.g. `tenantId`, `permissions`) — not just inside `claims`/`user`. A second generic, `TSession`, is inferred from `transformSession`'s return type and threads through the session store, cookies, `event.locals.oidc`, and `handleCallback`'s result — again with no casts:
+
+```ts
+// src/lib/server/auth.ts
+import { createOIDC, type OIDCSession } from 'sveltekit-oidc/server';
+
+type AppSession = OIDCSession<AppClaims> & {
+	tenantId: string;
+	permissions: string[];
+};
+
+export const oidc = createOIDC({
+	issuer: 'https://your-idp.example.com',
+	clientId: process.env.OIDC_CLIENT_ID!,
+	cookieSecret: process.env.OIDC_COOKIE_SECRET!,
+	transformClaims: (claims) => ({ ...claims, tenant: claims.tenant as string | undefined }),
+	transformSession: (session): AppSession => ({
+		...session,
+		tenantId: session.claims?.tenant ?? 'default',
+		permissions: session.user?.roles ?? []
+	})
+});
+```
+
+Extract the inferred type with `OIDCInferSession` and apply it alongside `OIDCInferClaims`:
+
+```ts
+// src/app.d.ts
+import type { OIDCHandleLocals, OIDCInferClaims, OIDCInferSession } from 'sveltekit-oidc/server';
+import { oidc } from '$lib/server/auth';
+
+export type AppClaims = OIDCInferClaims<typeof oidc>;
+export type AppSession = OIDCInferSession<typeof oidc>;
+
+declare global {
+	namespace App {
+		interface Locals {
+			oidc?: OIDCHandleLocals<AppClaims, AppSession>;
+		}
+	}
+}
+
+export {};
+```
+
+Now `event.locals.oidc?.session?.tenantId` is `string` and `?.permissions` is `string[]` everywhere — and `oidc.requireAuth(event)` / `handleCallback`'s `onsuccess` resolve to `AppSession` directly.
+
+If `transformSession` is omitted, `TSession` defaults to `OIDCSession<TClaims>` — existing setups keep working unchanged.
+
 ## Example App
 
 This repository now includes a runnable example under [src/routes](C:/Users/alexa/WebstormProjects/github.com/SourceRegistry/sveltekit-oidc/src/routes) and [src/hooks.server.ts](C:/Users/alexa/WebstormProjects/github.com/SourceRegistry/sveltekit-oidc/src/hooks.server.ts).

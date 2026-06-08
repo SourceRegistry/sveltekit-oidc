@@ -1,12 +1,15 @@
-import type { CookieOptions, OIDCCookies, OIDCUserClaims } from './types.js';
+import type { CookieOptions, OIDCCookies, OIDCSession, OIDCUserClaims } from './types.js';
 import { parseSignedCookie, serializeSignedCookie } from './utils.js';
 
-export function createOIDCCookieStore<TClaims extends OIDCUserClaims = OIDCUserClaims>(
+export function createOIDCCookieStore<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+>(
 	cookieSecret: string,
 	sessionCookieName: string,
 	stateCookieName: string,
 	cookieOptions: CookieOptions
-): OIDCCookies<TClaims> {
+): OIDCCookies<TClaims, TSession> {
 	return {
 		readSession(cookies) {
 			return parseSignedCookie(cookies.get(sessionCookieName), cookieSecret);

@@ -53,9 +53,10 @@ import {
 export type * from './types.js';
 export { createInMemoryBackChannelLogoutStore, createInMemorySessionStore } from './store.js';
 
-export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
-	options: OIDCOptions<TClaims>
-): OIDCInstance<TClaims> {
+export function createOIDC<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+>(options: OIDCOptions<TClaims, TSession>): OIDCInstance<TClaims, TSession> {
 	const cookieOptions = buildCookieOptions(options.cookieOptions);
 	const clockSkewSeconds = options.clockSkewSeconds ?? 30;
 	const refreshToleranceSeconds = options.refreshToleranceSeconds ?? 30;
@@ -67,7 +68,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 	const clientAuthMethod: OIDCClientAuthMethod =
 		options.clientAuthMethod ?? (options.clientSecret ? 'client_secret_basic' : 'none');
 
-	const cookieStore = createOIDCCookieStore<TClaims>(
+	const cookieStore = createOIDCCookieStore<TClaims, TSession>(
 		options.cookieSecret,
 		sessionCookieName,
 		stateCookieName,
@@ -79,7 +80,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 
 	async function readPersistedSession(
 		cookies: RequestEvent['cookies']
-	): Promise<OIDCPersistedSession<TClaims> | null> {
+	): Promise<OIDCPersistedSession<TClaims, TSession> | null> {
 		if (!options.sessionStore) {
 			const session = cookieStore.readSession(cookies);
 			return session ? { session } : null;
@@ -104,7 +105,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 
 	async function writePersistedSession(
 		cookies: RequestEvent['cookies'],
-		session: OIDCSession<TClaims>,
+		session: TSession,
 		sessionId?: string
 	): Promise<void> {
 		if (!options.sessionStore) {
@@ -352,7 +353,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 		});
 	}
 
-	async function isRevoked(session: OIDCSession<TClaims> | null) {
+	async function isRevoked(session: TSession | null) {
 		if (!session || !options.backChannelLogoutStore) {
 			return false;
 		}
@@ -362,7 +363,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 
 	async function maybeRefreshSession(
 		event: RequestEvent,
-		persisted: OIDCPersistedSession<TClaims> | null
+		persisted: OIDCPersistedSession<TClaims, TSession> | null
 	) {
 		const session = persisted?.session ?? null;
 		if (!session) {
@@ -404,7 +405,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 						user,
 						isRefresh: true
 					})
-				: nextSession;
+				: (nextSession as TSession);
 			await writePersistedSession(event.cookies, finalSession, persisted?.id);
 			return finalSession;
 		} catch {
@@ -459,7 +460,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 		throw redirect(302, authorizationUrl.toString());
 	}
 
-	async function handleCallback(event: RequestEvent): Promise<OIDCCallbackResult<TClaims>> {
+	async function handleCallback(event: RequestEvent): Promise<OIDCCallbackResult<TClaims, TSession>> {
 		const providerError = parseProviderError(event);
 		if (providerError) {
 			throw providerError;
@@ -516,7 +517,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 					user,
 					isRefresh: false
 				})
-			: session;
+			: (session as TSession);
 
 		await writePersistedSession(event.cookies, finalSession);
 
@@ -610,7 +611,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 
 	const handle: Handle = async ({ event, resolve }) => {
 		const session = await getSession(event);
-		(event.locals as { oidc?: OIDCHandleLocals<TClaims> }).oidc = {
+		(event.locals as { oidc?: OIDCHandleLocals<TClaims, TSession> }).oidc = {
 			isAuthenticated: Boolean(session),
 			session,
 			user: session?.user,
@@ -634,7 +635,7 @@ export function createOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 		};
 	}
 
-	function callbackHandler(handlerOptions: OIDCCallbackHandlerOptions<TClaims> = {}): RequestHandler {
+	function callbackHandler(handlerOptions: OIDCCallbackHandlerOptions<TClaims, TSession> = {}): RequestHandler {
 		return async (event) => {
 			try {
 				const result = await handleCallback(event);

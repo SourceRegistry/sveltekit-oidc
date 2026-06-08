@@ -148,14 +148,20 @@ export type OIDCBackChannelLogoutRecord = {
 	iat: number;
 };
 
-export type OIDCBackChannelLogoutStore<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
+export type OIDCBackChannelLogoutStore<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
 	revoke(record: OIDCBackChannelLogoutRecord): MaybePromise<void>;
-	isRevoked(session: OIDCSession<TClaims>): MaybePromise<boolean>;
+	isRevoked(session: TSession): MaybePromise<boolean>;
 };
 
-export type OIDCSessionStore<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
-	get(sessionId: string): MaybePromise<OIDCSession<TClaims> | null>;
-	set(sessionId: string, session: OIDCSession<TClaims>): MaybePromise<void>;
+export type OIDCSessionStore<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
+	get(sessionId: string): MaybePromise<TSession | null>;
+	set(sessionId: string, session: TSession): MaybePromise<void>;
 	delete(sessionId: string): MaybePromise<void>;
 };
 
@@ -177,7 +183,10 @@ export type OIDCSessionManagementConfig = {
 	backChannelLogoutSessionSupported: boolean;
 };
 
-export type OIDCOptions<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
+export type OIDCOptions<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
 	issuer?: string;
 	discoveryUrl?: string;
 	clientId: string;
@@ -199,8 +208,8 @@ export type OIDCOptions<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
 	refreshToleranceSeconds?: number;
 	defaultLoginRedirect?: string;
 	defaultLogoutRedirect?: string;
-	sessionStore?: OIDCSessionStore<TClaims>;
-	backChannelLogoutStore?: OIDCBackChannelLogoutStore<TClaims>;
+	sessionStore?: OIDCSessionStore<TClaims, TSession>;
+	backChannelLogoutStore?: OIDCBackChannelLogoutStore<TClaims, TSession>;
 	transformClaims?: (claims: OIDCUserClaims) => MaybePromise<TClaims>;
 	transformUser?: (
 		user: OIDCUserClaims | undefined,
@@ -215,7 +224,7 @@ export type OIDCOptions<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
 			user?: TClaims;
 			isRefresh: boolean;
 		}
-	) => MaybePromise<OIDCSession<TClaims>>;
+	) => MaybePromise<TSession>;
 	endpoints?: Partial<OIDCDiscoveryDocument>;
 };
 
@@ -232,17 +241,23 @@ export type OIDCLogoutOptions = {
 	clearSessionOnly?: boolean;
 };
 
-export type OIDCCallbackResult<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
-	session: OIDCSession<TClaims>;
+export type OIDCCallbackResult<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
+	session: TSession;
 	returnTo: string;
 };
 
-export type OIDCHandleLocals<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
+export type OIDCHandleLocals<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
 	isAuthenticated: boolean;
-	session: OIDCSession<TClaims> | null;
+	session: TSession | null;
 	user?: TClaims;
 	claims?: TClaims;
-	requireAuth: () => Promise<OIDCSession<TClaims>>;
+	requireAuth: () => Promise<TSession>;
 	clearSession: () => Promise<void>;
 };
 
@@ -254,10 +269,13 @@ export type OIDCStateCookie = {
 	createdAt: number;
 };
 
-export type OIDCCallbackHandlerOptions<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
+export type OIDCCallbackHandlerOptions<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
 	onsuccess?: (
 		event: RequestEvent,
-		result: OIDCCallbackResult<TClaims>
+		result: OIDCCallbackResult<TClaims, TSession>
 	) => MaybePromise<Response | void>;
 	onfailure?: (event: RequestEvent, err: unknown) => MaybePromise<Response | void>;
 	redirectTo?: string;
@@ -274,9 +292,12 @@ export type OIDCClientAssertionOptions = {
 	clientSecret?: string;
 };
 
-export type OIDCCookies<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
-	readSession(cookies: Cookies): OIDCSession<TClaims> | null;
-	writeSession(cookies: Cookies, session: OIDCSession<TClaims>): void;
+export type OIDCCookies<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
+	readSession(cookies: Cookies): TSession | null;
+	writeSession(cookies: Cookies, session: TSession): void;
 	clearSession(cookies: Cookies): void;
 	readSessionReference(cookies: Cookies): { id: string } | null;
 	writeSessionReference(cookies: Cookies, reference: { id: string }): void;
@@ -286,31 +307,39 @@ export type OIDCCookies<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
 	clearState(cookies: Cookies): void;
 };
 
-export type OIDCPersistedSession<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
+export type OIDCPersistedSession<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
 	id?: string;
-	session: OIDCSession<TClaims>;
+	session: TSession;
 };
 
-export type OIDCInstance<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
+export type OIDCInstance<
+	TClaims extends OIDCUserClaims = OIDCUserClaims,
+	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
+> = {
 	handle: Handle;
 	getMetadata: () => Promise<OIDCDiscoveryDocument>;
-	getSession: (event: RequestEvent) => Promise<OIDCSession<TClaims> | null>;
+	getSession: (event: RequestEvent) => Promise<TSession | null>;
 	getPublicSession: (event: RequestEvent) => Promise<OIDCPublicSession<TClaims> | null>;
 	getSessionManagementConfig: () => Promise<OIDCSessionManagementConfig>;
 	login: (event: RequestEvent, loginOptions?: OIDCLoginOptions) => Promise<never>;
 	logout: (event: RequestEvent, logoutOptions?: OIDCLogoutOptions) => Promise<never>;
-	handleCallback: (event: RequestEvent) => Promise<OIDCCallbackResult<TClaims>>;
+	handleCallback: (event: RequestEvent) => Promise<OIDCCallbackResult<TClaims, TSession>>;
 	handleBackChannelLogout: (event: RequestEvent) => Promise<Response>;
 	loginHandler: (defaults?: OIDCLoginOptions) => RequestHandler;
-	callbackHandler: (handlerOptions?: OIDCCallbackHandlerOptions<TClaims>) => RequestHandler;
+	callbackHandler: (handlerOptions?: OIDCCallbackHandlerOptions<TClaims, TSession>) => RequestHandler;
 	logoutHandler: (defaults?: OIDCLogoutOptions) => RequestHandler;
 	backChannelLogoutHandler: () => RequestHandler;
 	createActions: (actionOptions?: OIDCActionOptions) => Readonly<{
 		login: Action;
 		logout: Action;
 	}>;
-	requireAuth: (event: RequestEvent, returnTo?: string) => Promise<OIDCSession<TClaims>>;
+	requireAuth: (event: RequestEvent, returnTo?: string) => Promise<TSession>;
 	clearSession: (cookies: Cookies) => Promise<void>;
 };
 
 export type OIDCInferClaims<T> = T extends OIDCInstance<infer TClaims> ? TClaims : OIDCUserClaims;
+export type OIDCInferSession<T> =
+	T extends OIDCInstance<infer _TClaims, infer TSession> ? TSession : OIDCSession<OIDCUserClaims>;
