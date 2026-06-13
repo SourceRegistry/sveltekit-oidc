@@ -19,6 +19,7 @@
         loginPath,
         logoutPath = '/auth/logout',
         checkSessionIntervalMs = 5000,
+        monitorSession = true,
         revalidateIntervalMs = 30000,
         redirectOnExpired = 'login',
         redirectOnRevoked = 'login',
@@ -30,6 +31,7 @@
         loginPath?: string;
         logoutPath?: string;
         checkSessionIntervalMs?: number;
+        monitorSession?: boolean;
         revalidateIntervalMs?: number;
         redirectOnExpired?: RedirectMode;
         redirectOnRevoked?: RedirectMode;
@@ -47,7 +49,7 @@
         config.metadata.check_session_iframe ?? config.checkSessionIframe ?? undefined
     );
     const canMonitorIframe = $derived(
-        Boolean(session?.isAuthenticated && session?.sessionState && iframeUrl)
+        Boolean(monitorSession && session?.isAuthenticated && session?.sessionState && iframeUrl)
     );
 
     const context = setOIDCContext<TClaims>({

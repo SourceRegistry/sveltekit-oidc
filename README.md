@@ -129,6 +129,7 @@ export async function load(event) {
 	session={data.session}
 	config={data.sessionManagement}
 	logoutPath="/auth/logout"
+	monitorSession={false}
 	redirectIfUnauthenticated={false}
 >
 	<Account />
@@ -159,6 +160,10 @@ export async function load(event) {
 - `check_session_iframe` polling when the provider advertises it
 - periodic `invalidateAll()` revalidation so revoked server sessions are detected
 - a client context for nested auth-aware components through `useOIDC()` / `getOIDCContext()`
+
+Set `monitorSession={false}` when you want to keep the client context but leave remote session
+revocation checks to your server-side guard or another mechanism. This disables
+`check_session_iframe` polling without changing the provider metadata exposed through the context.
 
 ## Typed Custom Claims
 
@@ -302,6 +307,6 @@ Set these environment variables to enable it:
 - The library validates `id_token` and `logout_token` values through `@sourceregistry/node-jwt` and provider JWKS metadata.
 - `groups` are normalized onto the session from `groups` and `roles` claims when present.
 - Use `transformClaims`, `transformUser`, and `transformSession` to project provider-specific claims into your own session shape.
-- `check_session_iframe` monitoring only runs when the provider advertises that endpoint and the session includes `session_state`.
+- `check_session_iframe` monitoring only runs when `monitorSession` is enabled, the provider advertises that endpoint, and the session includes `session_state`.
 - Refresh token handling is automatic when a valid refresh token is present.
 - `event.locals.oidc` is attached by the hook and typed via `OIDCHandleLocals<TClaims>`; see [Typed Custom Claims](#typed-custom-claims) for wiring your own claim shapes through `app.d.ts`.
