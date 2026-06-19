@@ -186,16 +186,7 @@ export {};
 
 Now `event.locals.oidc?.claims?.roles` is `string[]` and `?.tenant` is `string | undefined` in every hook, load function, and action — no separate type aliases needed.
 
-When you need the claim type explicitly (e.g. in a Svelte component), use `OIDCInferClaims`:
-
-```ts
-import type { OIDCInferClaims } from '@sourceregistry/sveltekit-oidc/server';
-import { oidc } from '$lib/server/auth';
-
-type AppClaims = OIDCInferClaims<typeof oidc>;
-```
-
-`OIDCContext` is a generic component, but Svelte doesn't support passing explicit type arguments in markup — `TClaims` is inferred from the `session` prop instead. Since `data.session` comes from `oidc.getPublicSession(event)`, it's already typed `OIDCPublicSession<AppClaims> | null`, so the inference flows through automatically:
+`OIDCContext` is a generic component, but Svelte doesn't support passing explicit type arguments in markup — `TClaims` is inferred from the `session` prop instead. Since `data.session` comes from `oidc.getPublicSession(event)`, the type flows through automatically:
 
 ```html
 <!-- src/routes/+layout.svelte -->
@@ -230,8 +221,9 @@ Backend apps commonly stash application-specific data on the session itself (e.g
 
 ```ts
 // src/lib/server/auth.ts
-import { createOIDC, type OIDCSession } from '@sourceregistry/sveltekit-oidc/server';
+import { createOIDC, type OIDCSession, type OIDCUserClaims } from '@sourceregistry/sveltekit-oidc/server';
 
+type AppClaims = OIDCUserClaims & { tenant?: string };
 type AppSession = OIDCSession<AppClaims> & {
 	tenantId: string;
 	permissions: string[];
@@ -270,11 +262,11 @@ export {};
 
 Now `event.locals.oidc?.session?.tenantId` is `string` and `?.permissions` is `string[]` everywhere — and `oidc.requireAuth(event)` / `handleCallback`'s `onsuccess` resolve to `AppSession` directly.
 
-Use `OIDCInferClaims` / `OIDCInferSession` when you need the types explicitly:
+Use `OIDCInferClaims` / `OIDCInferSession` when you need the types explicitly in non-Svelte code (utility functions, API helpers, etc.):
 
 ```ts
 import type { OIDCInferClaims, OIDCInferSession } from '@sourceregistry/sveltekit-oidc/server';
-import { oidc } from '$lib/server/auth';
+import type { oidc } from '$lib/server/auth';
 
 type AppClaims = OIDCInferClaims<typeof oidc>;
 type AppSession = OIDCInferSession<typeof oidc>;
