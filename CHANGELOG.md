@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.0...v1.6.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* revalidate before redirecting on token expiry ([29bc6c2](https://github.com/SourceRegistry/sveltekit-oidc/commit/29bc6c20549cbc8e2d1d42503e4df7c25358605f))
+
 # [1.6.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.5.0...v1.6.0) (2026-06-19)
 
 
