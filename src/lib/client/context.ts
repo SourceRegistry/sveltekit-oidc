@@ -1,6 +1,8 @@
 import { getContext, hasContext, setContext } from 'svelte';
 
-import type { OIDCDiscoveryDocument, OIDCPublicSession, OIDCUserClaims } from '../server/index.js';
+import type { OIDCDiscoveryDocument, OIDCHandleLocals, OIDCPublicSession, OIDCUserClaims } from '../server/index.js';
+
+type LocalsClaims = App.Locals extends { oidc?: OIDCHandleLocals<infer C, any> } ? C : OIDCUserClaims;
 
 export type OIDCClientContextValue<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
 	isAuthenticated: boolean;
@@ -31,11 +33,11 @@ export function setOIDCContext<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 	return value;
 }
 
-export function getOIDCContext<TClaims extends OIDCUserClaims = OIDCUserClaims>(): OIDCClientContextValue<TClaims> {
+export function getOIDCContext<TClaims extends OIDCUserClaims = LocalsClaims>(): OIDCClientContextValue<TClaims> {
 	return getContext<OIDCClientContextValue<TClaims>>(OIDC_CONTEXT_KEY);
 }
 
-export function useOIDC<TClaims extends OIDCUserClaims = OIDCUserClaims>(): OIDCClientContextValue<TClaims> {
+export function useOIDC<TClaims extends OIDCUserClaims = LocalsClaims>(): OIDCClientContextValue<TClaims> {
 	if (!hasContext(OIDC_CONTEXT_KEY)) {
 		throw new Error('OIDC context is not available. Wrap this component tree with <OIDCContext>.');
 	}

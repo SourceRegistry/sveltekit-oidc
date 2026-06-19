@@ -213,10 +213,8 @@ type AppClaims = OIDCInferClaims<typeof oidc>;
 <!-- src/lib/Account.svelte -->
 <script lang="ts">
 	import { useOIDC } from '@sourceregistry/sveltekit-oidc';
-	import type { OIDCInferClaims } from '@sourceregistry/sveltekit-oidc';
-	import type { oidc } from '$lib/server/auth';
 
-	const auth = useOIDC<OIDCInferClaims<typeof oidc>>();
+	const auth = useOIDC(); // TClaims inferred from App.Locals.oidc
 </script>
 
 {#if auth.isAuthenticated}
