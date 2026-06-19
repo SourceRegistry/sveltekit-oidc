@@ -1,3 +1,15 @@
+# [1.5.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.4.0...v1.5.0) (2026-06-19)
+
+
+### Bug Fixes
+
+* scope package references and export infer types from client ([8e212c4](https://github.com/SourceRegistry/sveltekit-oidc/commit/8e212c47816a47949f1f4db6167784efbd3aabdf))
+
+
+### Features
+
+* infer TClaims from App.Locals in useOIDC and getOIDCContext ([fabc603](https://github.com/SourceRegistry/sveltekit-oidc/commit/fabc60355be19783efd0baefe1216bb0dde8f665))
+
 # [1.4.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.3.1...v1.4.0) (2026-06-19)
 
 
