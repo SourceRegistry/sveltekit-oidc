@@ -12,14 +12,14 @@ OIDC authentication helpers for SvelteKit with:
 ## Install
 
 ```sh
-npm install sveltekit-oidc
+npm install @sourceregistry/sveltekit-oidc
 ```
 
 ## Server Setup
 
 ```ts
 // src/lib/server/auth.ts
-import { createOIDC } from 'sveltekit-oidc/server';
+import { createOIDC } from '@sourceregistry/sveltekit-oidc/server';
 
 export const oidc = createOIDC({
 	issuer: 'https://your-idp.example.com',
@@ -104,7 +104,7 @@ export async function load(event) {
 
 ```html
 <script lang="ts">
-	import { OIDCContext } from 'sveltekit-oidc';
+	import { OIDCContext } from '@sourceregistry/sveltekit-oidc';
 	let { data } = $props();
 </script>
 
@@ -122,7 +122,7 @@ export async function load(event) {
 ```html
 <!-- src/lib/Account.svelte -->
 <script lang="ts">
-	import { useOIDC } from 'sveltekit-oidc';
+	import { useOIDC } from '@sourceregistry/sveltekit-oidc';
 
 	const oidc = useOIDC();
 </script>
@@ -170,7 +170,7 @@ Wire `App.Locals` so `event.locals.oidc` is fully typed everywhere — `OIDCLoca
 
 ```ts
 // src/app.d.ts
-import type { OIDCLocals } from 'sveltekit-oidc/server';
+import type { OIDCLocals } from '@sourceregistry/sveltekit-oidc/server';
 import { oidc } from '$lib/server/auth';
 
 declare global {
@@ -189,7 +189,7 @@ Now `event.locals.oidc?.claims?.roles` is `string[]` and `?.tenant` is `string |
 When you need the claim type explicitly (e.g. in a Svelte component), use `OIDCInferClaims`:
 
 ```ts
-import type { OIDCInferClaims } from 'sveltekit-oidc/server';
+import type { OIDCInferClaims } from '@sourceregistry/sveltekit-oidc/server';
 import { oidc } from '$lib/server/auth';
 
 type AppClaims = OIDCInferClaims<typeof oidc>;
@@ -200,7 +200,7 @@ type AppClaims = OIDCInferClaims<typeof oidc>;
 ```html
 <!-- src/routes/+layout.svelte -->
 <script lang="ts">
-	import { OIDCContext } from 'sveltekit-oidc';
+	import { OIDCContext } from '@sourceregistry/sveltekit-oidc';
 	let { data, children } = $props();
 </script>
 
@@ -212,14 +212,15 @@ type AppClaims = OIDCInferClaims<typeof oidc>;
 ```html
 <!-- src/lib/Account.svelte -->
 <script lang="ts">
-	import { useOIDC } from 'sveltekit-oidc';
-	import type { AppClaims } from '../../app.d.ts';
+	import { useOIDC } from '@sourceregistry/sveltekit-oidc';
+	import type { OIDCInferClaims } from '@sourceregistry/sveltekit-oidc';
+	import type { oidc } from '$lib/server/auth';
 
-	const oidc = useOIDC<AppClaims>();
+	const auth = useOIDC<OIDCInferClaims<typeof oidc>>();
 </script>
 
-{#if oidc.isAuthenticated}
-	<p>Roles: {oidc.claims?.roles.join(', ')}</p>
+{#if auth.isAuthenticated}
+	<p>Roles: {auth.claims?.roles.join(', ')}</p>
 {/if}
 ```
 
@@ -231,7 +232,7 @@ Backend apps commonly stash application-specific data on the session itself (e.g
 
 ```ts
 // src/lib/server/auth.ts
-import { createOIDC, type OIDCSession } from 'sveltekit-oidc/server';
+import { createOIDC, type OIDCSession } from '@sourceregistry/sveltekit-oidc/server';
 
 type AppSession = OIDCSession<AppClaims> & {
 	tenantId: string;
@@ -255,7 +256,7 @@ export const oidc = createOIDC({
 
 ```ts
 // src/app.d.ts
-import type { OIDCLocals } from 'sveltekit-oidc/server';
+import type { OIDCLocals } from '@sourceregistry/sveltekit-oidc/server';
 import { oidc } from '$lib/server/auth';
 
 declare global {
@@ -274,7 +275,7 @@ Now `event.locals.oidc?.session?.tenantId` is `string` and `?.permissions` is `s
 Use `OIDCInferClaims` / `OIDCInferSession` when you need the types explicitly:
 
 ```ts
-import type { OIDCInferClaims, OIDCInferSession } from 'sveltekit-oidc/server';
+import type { OIDCInferClaims, OIDCInferSession } from '@sourceregistry/sveltekit-oidc/server';
 import { oidc } from '$lib/server/auth';
 
 type AppClaims = OIDCInferClaims<typeof oidc>;
