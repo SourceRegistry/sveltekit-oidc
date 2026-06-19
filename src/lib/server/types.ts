@@ -351,3 +351,7 @@ export type OIDCInstance<
 export type OIDCInferClaims<T> = T extends OIDCInstance<infer TClaims> ? TClaims : OIDCUserClaims;
 export type OIDCInferSession<T> =
 	T extends OIDCInstance<infer _TClaims, infer TSession> ? TSession : OIDCSession<OIDCUserClaims>;
+export type OIDCLocals<T extends OIDCInstance<any, any>> = OIDCHandleLocals<
+	OIDCInferClaims<T>,
+	OIDCInferSession<T>
+>;

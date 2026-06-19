@@ -19,10 +19,7 @@ npm install sveltekit-oidc
 
 ```ts
 // src/lib/server/auth.ts
-import {
-	createInMemoryBackChannelLogoutStore,
-	createOIDC
-} from 'sveltekit-oidc/server';
+import { createOIDC } from 'sveltekit-oidc/server';
 
 export const oidc = createOIDC({
 	issuer: 'https://your-idp.example.com',
@@ -32,22 +29,8 @@ export const oidc = createOIDC({
 	clientAuthMethod: 'client_secret_basic',
 	loginPath: '/auth/login',
 	redirectPath: '/auth/callback',
-	scope: ['openid', 'profile', 'email', 'offline_access'],
-	clockSkewSeconds: 30,
-	fetchUserInfo: true,
-	backChannelLogoutStore: createInMemoryBackChannelLogoutStore(),
-	transformSession(session) {
-		return {
-			...session,
-			groups: session.groups,
-			user: session.user
-				? {
-						...session.user,
-						groups: session.groups
-					}
-				: session.user
-		};
-	},
+	scope: 'openid profile email offline_access',
+	backChannelLogoutStore: 'memory',
 	cookieOptions: {
 		secure: process.env.NODE_ENV === 'production'
 	}
@@ -183,19 +166,17 @@ export const oidc = createOIDC({
 });
 ```
 
-Extract the inferred type with `OIDCInferClaims` and apply it to `App.Locals` so `event.locals.oidc` is typed everywhere:
+Wire `App.Locals` so `event.locals.oidc` is fully typed everywhere — `OIDCLocals` infers everything directly from the instance:
 
 ```ts
 // src/app.d.ts
-import type { OIDCHandleLocals, OIDCInferClaims } from 'sveltekit-oidc/server';
+import type { OIDCLocals } from 'sveltekit-oidc/server';
 import { oidc } from '$lib/server/auth';
-
-export type AppClaims = OIDCInferClaims<typeof oidc>;
 
 declare global {
 	namespace App {
 		interface Locals {
-			oidc?: OIDCHandleLocals<AppClaims>;
+			oidc?: OIDCLocals<typeof oidc>;
 		}
 	}
 }
@@ -203,7 +184,16 @@ declare global {
 export {};
 ```
 
-Now `event.locals.oidc?.claims?.roles` is `string[]` and `?.tenant` is `string | undefined` in every hook, load function, and action.
+Now `event.locals.oidc?.claims?.roles` is `string[]` and `?.tenant` is `string | undefined` in every hook, load function, and action — no separate type aliases needed.
+
+When you need the claim type explicitly (e.g. in a Svelte component), use `OIDCInferClaims`:
+
+```ts
+import type { OIDCInferClaims } from 'sveltekit-oidc/server';
+import { oidc } from '$lib/server/auth';
+
+type AppClaims = OIDCInferClaims<typeof oidc>;
+```
 
 `OIDCContext` is a generic component, but Svelte doesn't support passing explicit type arguments in markup — `TClaims` is inferred from the `session` prop instead. Since `data.session` comes from `oidc.getPublicSession(event)`, it's already typed `OIDCPublicSession<AppClaims> | null`, so the inference flows through automatically:
 
@@ -261,20 +251,17 @@ export const oidc = createOIDC({
 });
 ```
 
-Extract the inferred type with `OIDCInferSession` and apply it alongside `OIDCInferClaims`:
+`app.d.ts` stays a one-liner — `OIDCLocals` picks up both `TClaims` and `TSession` from the instance:
 
 ```ts
 // src/app.d.ts
-import type { OIDCHandleLocals, OIDCInferClaims, OIDCInferSession } from 'sveltekit-oidc/server';
+import type { OIDCLocals } from 'sveltekit-oidc/server';
 import { oidc } from '$lib/server/auth';
-
-export type AppClaims = OIDCInferClaims<typeof oidc>;
-export type AppSession = OIDCInferSession<typeof oidc>;
 
 declare global {
 	namespace App {
 		interface Locals {
-			oidc?: OIDCHandleLocals<AppClaims, AppSession>;
+			oidc?: OIDCLocals<typeof oidc>;
 		}
 	}
 }
@@ -283,6 +270,16 @@ export {};
 ```
 
 Now `event.locals.oidc?.session?.tenantId` is `string` and `?.permissions` is `string[]` everywhere — and `oidc.requireAuth(event)` / `handleCallback`'s `onsuccess` resolve to `AppSession` directly.
+
+Use `OIDCInferClaims` / `OIDCInferSession` when you need the types explicitly:
+
+```ts
+import type { OIDCInferClaims, OIDCInferSession } from 'sveltekit-oidc/server';
+import { oidc } from '$lib/server/auth';
+
+type AppClaims = OIDCInferClaims<typeof oidc>;
+type AppSession = OIDCInferSession<typeof oidc>;
+```
 
 If `transformSession` is omitted, `TSession` defaults to `OIDCSession<TClaims>` — existing setups keep working unchanged.
 
@@ -309,4 +306,4 @@ Set these environment variables to enable it:
 - Use `transformClaims`, `transformUser`, and `transformSession` to project provider-specific claims into your own session shape.
 - `check_session_iframe` monitoring only runs when `monitorSession` is enabled, the provider advertises that endpoint, and the session includes `session_state`.
 - Refresh token handling is automatic when a valid refresh token is present.
-- `event.locals.oidc` is attached by the hook and typed via `OIDCHandleLocals<TClaims>`; see [Typed Custom Claims](#typed-custom-claims) for wiring your own claim shapes through `app.d.ts`.
+- `event.locals.oidc` is attached by the hook; wire it in `app.d.ts` with `OIDCLocals<typeof oidc>` — see [Typed Custom Claims](#typed-custom-claims).
