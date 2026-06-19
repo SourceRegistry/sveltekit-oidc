@@ -1,3 +1,11 @@
+# [1.4.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.3.1...v1.4.0) (2026-06-19)
+
+
+### Features
+
+* add OIDCLocals helper type and update docs ([5a7f324](https://github.com/SourceRegistry/sveltekit-oidc/commit/5a7f324c06512d8fa45bb853cfd3a6a919bb085b))
+* ergonomic createOIDC options and structured logging ([9b5c6df](https://github.com/SourceRegistry/sveltekit-oidc/commit/9b5c6dfa35993f2238bb5bac7cb86ddf046be634))
+
 ## [1.3.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.3.0...v1.3.1) (2026-06-13)
 
 
