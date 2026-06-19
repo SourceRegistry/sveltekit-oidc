@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.5.0...v1.6.0) (2026-06-19)
+
+
+### Features
+
+* **example:** migrate to new typing system ([cf220ee](https://github.com/SourceRegistry/sveltekit-oidc/commit/cf220ee83f7cb59318da798cf0ad8c37dbf53f59))
+
 # [1.5.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.4.0...v1.5.0) (2026-06-19)
 
 
