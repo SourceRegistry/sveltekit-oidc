@@ -1,8 +1,8 @@
 <script lang="ts">
     import {useOIDC} from "@sourceregistry/sveltekit-oidc/client";
-    import type {AppClaims} from "$lib/server/configurations/oidc.configuration";
 
-    const oidc = useOIDC<AppClaims>();
+    // TClaims inferred from App.Locals.oidc — no explicit type arg needed
+    const oidc = useOIDC();
     let {data} = $props();
 </script>
 
