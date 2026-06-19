@@ -26,6 +26,7 @@ import type {
 	OIDCClientAuthMethod,
 	OIDCDiscoveryDocument,
 	OIDCHandleLocals,
+	OIDCLogger,
 	OIDCLoginOptions,
 	OIDCLogoutOptions,
 	OIDCOptions,
@@ -53,10 +54,38 @@ import {
 export type * from './types.js';
 export { createInMemoryBackChannelLogoutStore, createInMemorySessionStore } from './store.js';
 
+import { createInMemoryBackChannelLogoutStore, createInMemorySessionStore } from './store.js';
+
+function buildLogger(logger: OIDCLogger | false | undefined): Required<OIDCLogger> {
+	const noop = () => {};
+	if (logger === false) return { debug: noop, info: noop, warn: noop, error: noop };
+	if (logger) return {
+		debug: (...a) => logger.debug?.(...a),
+		info:  (...a) => logger.info?.(...a),
+		warn:  (...a) => logger.warn?.(...a),
+		error: (...a) => logger.error?.(...a),
+	};
+	const p = '[sveltekit-oidc]';
+	return {
+		debug: (...a) => console.debug(p, ...a),
+		info:  (...a) => console.info(p, ...a),
+		warn:  (...a) => console.warn(p, ...a),
+		error: (...a) => console.error(p, ...a),
+	};
+}
+
 export function createOIDC<
 	TClaims extends OIDCUserClaims = OIDCUserClaims,
 	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
 >(options: OIDCOptions<TClaims, TSession>): OIDCInstance<TClaims, TSession> {
+	const log = buildLogger(options.logger);
+	const sessionStore = options.sessionStore === 'memory'
+		? createInMemorySessionStore<TClaims, TSession>()
+		: options.sessionStore;
+	const backChannelLogoutStore = options.backChannelLogoutStore === 'memory'
+		? createInMemoryBackChannelLogoutStore<TClaims, TSession>()
+		: options.backChannelLogoutStore;
+
 	const cookieOptions = buildCookieOptions(options.cookieOptions);
 	const clockSkewSeconds = options.clockSkewSeconds ?? 30;
 	const refreshToleranceSeconds = options.refreshToleranceSeconds ?? 30;
@@ -81,7 +110,7 @@ export function createOIDC<
 	async function readPersistedSession(
 		cookies: RequestEvent['cookies']
 	): Promise<OIDCPersistedSession<TClaims, TSession> | null> {
-		if (!options.sessionStore) {
+		if (!sessionStore) {
 			const session = cookieStore.readSession(cookies);
 			return session ? { session } : null;
 		}
@@ -91,7 +120,7 @@ export function createOIDC<
 			return null;
 		}
 
-		const session = await options.sessionStore.get(reference.id);
+		const session = await sessionStore.get(reference.id);
 		if (!session) {
 			cookieStore.clearSessionReference(cookies);
 			return null;
@@ -108,13 +137,13 @@ export function createOIDC<
 		session: TSession,
 		sessionId?: string
 	): Promise<void> {
-		if (!options.sessionStore) {
+		if (!sessionStore) {
 			cookieStore.writeSession(cookies, session);
 			return;
 		}
 
 		const id = sessionId ?? base64UrlEncode(randomBytes(24));
-		await options.sessionStore.set(id, session);
+		await sessionStore.set(id, session);
 		cookieStore.writeSessionReference(cookies, { id });
 	}
 
@@ -122,14 +151,14 @@ export function createOIDC<
 		cookies: RequestEvent['cookies'],
 		sessionId?: string
 	): Promise<void> {
-		if (!options.sessionStore) {
+		if (!sessionStore) {
 			cookieStore.clearSession(cookies);
 			return;
 		}
 
 		const id = sessionId ?? cookieStore.readSessionReference(cookies)?.id;
 		if (id) {
-			await options.sessionStore.delete(id);
+			await sessionStore.delete(id);
 		}
 		cookieStore.clearSessionReference(cookies);
 	}
@@ -354,11 +383,11 @@ export function createOIDC<
 	}
 
 	async function isRevoked(session: TSession | null) {
-		if (!session || !options.backChannelLogoutStore) {
+		if (!session || !backChannelLogoutStore) {
 			return false;
 		}
 
-		return options.backChannelLogoutStore.isRevoked(session);
+		return backChannelLogoutStore.isRevoked(session);
 	}
 
 	async function maybeRefreshSession(
@@ -408,7 +437,8 @@ export function createOIDC<
 				: (nextSession as TSession);
 			await writePersistedSession(event.cookies, finalSession, persisted?.id);
 			return finalSession;
-		} catch {
+		} catch (err) {
+			log.error('Token refresh failed — clearing session', err);
 			await clearPersistedSession(event.cookies, persisted?.id);
 			return null;
 		}
@@ -472,7 +502,8 @@ export function createOIDC<
 
 		if (!stateCookie || !state || !code || stateCookie.state !== state) {
 			cookieStore.clearState(event.cookies);
-			throw error(400, { message: 'Invalid or expired OIDC callback state' });
+			log.warn('Invalid or expired callback state — restarting login flow');
+			return signIn(event);
 		}
 
 		cookieStore.clearState(event.cookies);
@@ -570,7 +601,7 @@ export function createOIDC<
 		if (!metadata.backchannel_logout_supported) {
 			throw error(400, { message: 'Provider does not advertise back-channel logout support' });
 		}
-		if (!options.backChannelLogoutStore) {
+		if (!backChannelLogoutStore) {
 			throw error(500, {
 				message: 'backChannelLogoutStore is required for back-channel logout with cookie sessions'
 			});
@@ -583,7 +614,7 @@ export function createOIDC<
 		}
 
 		const claims = await validateBackChannelLogoutToken(logoutToken);
-		await options.backChannelLogoutStore.revoke({
+		await backChannelLogoutStore.revoke({
 			issuer: claims.iss,
 			clientId: options.clientId,
 			sid: claims.sid,

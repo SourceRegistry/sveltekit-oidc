@@ -19,8 +19,10 @@ export function normalizeIssuer(issuer: string) {
 	return issuer.endsWith('/') ? issuer.slice(0, -1) : issuer;
 }
 
-export function normalizeScope(scope?: string[]) {
-	return scope?.length ? [...new Set(scope)] : ['openid', 'profile', 'email'];
+export function normalizeScope(scope?: string | string[]) {
+	if (!scope) return ['openid', 'profile', 'email'];
+	const arr = typeof scope === 'string' ? scope.trim().split(/\s+/) : scope;
+	return arr.length ? [...new Set(arr)] : ['openid', 'profile', 'email'];
 }
 
 export function normalizeStringArray(value: unknown): string[] {

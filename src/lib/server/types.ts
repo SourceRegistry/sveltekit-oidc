@@ -183,6 +183,13 @@ export type OIDCSessionManagementConfig = {
 	backChannelLogoutSessionSupported: boolean;
 };
 
+export type OIDCLogger = {
+	debug?: (...args: unknown[]) => void;
+	info?: (...args: unknown[]) => void;
+	warn?: (...args: unknown[]) => void;
+	error?: (...args: unknown[]) => void;
+};
+
 export type OIDCOptions<
 	TClaims extends OIDCUserClaims = OIDCUserClaims,
 	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
@@ -197,7 +204,7 @@ export type OIDCOptions<
 	loginPath?: string;
 	redirectPath?: string;
 	postLogoutRedirectUri?: string;
-	scope?: string[];
+	scope?: string | string[];
 	audience?: string;
 	fetchUserInfo?: boolean;
 	sessionCookieName?: string;
@@ -208,8 +215,8 @@ export type OIDCOptions<
 	refreshToleranceSeconds?: number;
 	defaultLoginRedirect?: string;
 	defaultLogoutRedirect?: string;
-	sessionStore?: OIDCSessionStore<TClaims, TSession>;
-	backChannelLogoutStore?: OIDCBackChannelLogoutStore<TClaims, TSession>;
+	sessionStore?: OIDCSessionStore<TClaims, TSession> | 'memory';
+	backChannelLogoutStore?: OIDCBackChannelLogoutStore<TClaims, TSession> | 'memory';
 	transformClaims?: (claims: OIDCUserClaims) => MaybePromise<TClaims>;
 	transformUser?: (
 		user: OIDCUserClaims | undefined,
@@ -226,12 +233,13 @@ export type OIDCOptions<
 		}
 	) => MaybePromise<TSession>;
 	endpoints?: Partial<OIDCDiscoveryDocument>;
+	logger?: OIDCLogger | false;
 };
 
 export type OIDCLoginOptions = {
 	returnTo?: string;
 	prompt?: 'login' | 'consent' | 'none' | 'select_account';
-	scope?: string[];
+	scope?: string | string[];
 	extraParams?: Record<string, string>;
 };
 
