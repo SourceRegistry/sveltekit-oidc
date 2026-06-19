@@ -136,9 +136,15 @@
         }
 
         const timeoutMs = Math.max(0, session.expiresAt * 1000 - Date.now());
-        const timer = window.setTimeout(() => {
-            status = 'expired';
-            void handleRedirect(redirectOnExpired);
+        const timer = window.setTimeout(async () => {
+            // Silent revalidate first — server's maybeRefreshSession will refresh
+            // the token if a valid refresh_token exists. Only redirect if the
+            // session comes back unauthenticated after that.
+            await revalidate();
+            if (!session?.isAuthenticated) {
+                status = 'expired';
+                void handleRedirect(redirectOnExpired);
+            }
         }, timeoutMs);
 
         return () => window.clearTimeout(timer);
