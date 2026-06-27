@@ -345,7 +345,7 @@ export type OIDCInstance<
 		login: Action;
 		logout: Action;
 	}>;
-	requireAuth: (event: RequestEvent, returnTo?: string) => Promise<TSession>;
+	requireAuth: (event: { cookies: Cookies, url: URL }, returnTo?: string) => Promise<TSession>;
 	clearSession: (cookies: Cookies) => Promise<void>;
 };
 

@@ -1,4 +1,4 @@
-import { error, type RequestEvent } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import {
 	createCipheriv,
 	createDecipheriv,
@@ -124,7 +124,7 @@ export function buildCookieOptions(options?: Partial<CookieOptions>): CookieOpti
 	};
 }
 
-export function parseProviderError(event: RequestEvent) {
+export function parseProviderError(event: { url: URL }) {
 	const code = event.url.searchParams.get('error');
 	if (!code) return null;
 
@@ -133,12 +133,12 @@ export function parseProviderError(event: RequestEvent) {
 	});
 }
 
-export function absoluteUrl(event: RequestEvent, pathOrUrl: string) {
+export function absoluteUrl(event: {url: URL}, pathOrUrl: string) {
 	if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
 	return new URL(pathOrUrl, event.url).toString();
 }
 
-export function internalRedirectPath(event: RequestEvent, pathOrUrl: string | undefined, fallback = '/') {
+export function internalRedirectPath(event: {url: URL}, pathOrUrl: string | undefined, fallback = '/') {
 	if (!pathOrUrl) return fallback;
 
 	try {

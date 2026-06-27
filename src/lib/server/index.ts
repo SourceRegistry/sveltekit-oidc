@@ -626,7 +626,7 @@ export function createOIDC<
         return new Response(null, {status: 200});
     }
 
-    async function requireAuth(event: RequestEvent, returnTo?: string) {
+    async function requireAuth(event: {url: URL, cookies: RequestEvent['cookies']}, returnTo?: string) {
         const session = await getSession(event);
         if (session) {
             return session;
