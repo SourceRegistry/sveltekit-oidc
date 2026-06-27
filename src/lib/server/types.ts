@@ -330,8 +330,8 @@ export type OIDCInstance<
 	handle: Handle;
 	hook: (event: {cookies: RequestEvent['cookies']}) => Promise<{oidc:  OIDCHandleLocals<TClaims, TSession> }>
 	getMetadata: () => Promise<OIDCDiscoveryDocument>;
-	getSession: (event: RequestEvent) => Promise<TSession | null>;
-	getPublicSession: (event: RequestEvent) => Promise<OIDCPublicSession<TClaims> | null>;
+	getSession: (event: {cookies: RequestEvent['cookies']}) => Promise<TSession | null>;
+	getPublicSession: (event: {cookies: RequestEvent['cookies']}) => Promise<OIDCPublicSession<TClaims> | null>;
 	getSessionManagementConfig: () => Promise<OIDCSessionManagementConfig>;
 	login: (event: RequestEvent, loginOptions?: OIDCLoginOptions) => Promise<never>;
 	logout: (event: RequestEvent, logoutOptions?: OIDCLogoutOptions) => Promise<never>;

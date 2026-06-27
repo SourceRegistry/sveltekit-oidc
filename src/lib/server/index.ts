@@ -762,7 +762,7 @@ export function createOIDC<
         hook,
         getMetadata,
         getSession,
-        getPublicSession: async (event: RequestEvent): Promise<OIDCPublicSession<TClaims> | null> =>
+        getPublicSession: async (event: {cookies: RequestEvent['cookies']}): Promise<OIDCPublicSession<TClaims> | null> =>
             toPublicSession(await getSession(event)),
         getSessionManagementConfig,
         login: signIn,
