@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	collectGroups,
+	createSignedValue,
+	internalRedirectPath,
 	normalizeScope,
 	parseSignedCookie,
 	serializeSignedCookie
@@ -43,11 +45,46 @@ describe('signed cookie helpers', () => {
 		});
 	});
 
+	it('does not expose plaintext payload data', () => {
+		const value = serializeSignedCookie({ refreshToken: 'secret-refresh-token' }, 'test-secret');
+
+		expect(value).not.toContain('secret-refresh-token');
+		expect(value.startsWith('v2.')).toBe(true);
+	});
+
 	it('rejects tampered values', () => {
 		const secret = 'test-secret';
 		const value = serializeSignedCookie({ sub: 'user-1' }, secret);
 		const tampered = `${value}x`;
 
 		expect(parseSignedCookie(tampered, secret)).toBeNull();
+	});
+
+	it('rejects legacy signed-only values', () => {
+		const secret = 'test-secret';
+		const value = createSignedValue(Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64url'), secret);
+
+		expect(parseSignedCookie(value, secret)).toBeNull();
+	});
+});
+
+describe('internalRedirectPath', () => {
+	const event = {
+		url: new URL('https://app.example.test/current?x=1')
+	} as never;
+
+	it('keeps same-origin paths relative', () => {
+		expect(internalRedirectPath(event, '/account?tab=settings#profile')).toBe(
+			'/account?tab=settings#profile'
+		);
+	});
+
+	it('normalizes same-origin absolute URLs to paths', () => {
+		expect(internalRedirectPath(event, 'https://app.example.test/account')).toBe('/account');
+	});
+
+	it('rejects external redirects', () => {
+		expect(internalRedirectPath(event, 'https://attacker.example.test/phish', '/')).toBe('/');
+		expect(internalRedirectPath(event, '//attacker.example.test/phish', '/')).toBe('/');
 	});
 });

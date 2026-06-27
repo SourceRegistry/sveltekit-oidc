@@ -1,11 +1,18 @@
 # sveltekit-oidc
 
+[![npm version](https://img.shields.io/npm/v/@sourceregistry/sveltekit-oidc.svg)](https://www.npmjs.com/package/@sourceregistry/sveltekit-oidc)
+[![npm downloads](https://img.shields.io/npm/dm/@sourceregistry/sveltekit-oidc.svg)](https://www.npmjs.com/package/@sourceregistry/sveltekit-oidc)
+[![license](https://img.shields.io/npm/l/@sourceregistry/sveltekit-oidc.svg)](LICENSE)
+[![types](https://img.shields.io/npm/types/@sourceregistry/sveltekit-oidc.svg)](https://www.npmjs.com/package/@sourceregistry/sveltekit-oidc)
+[![Svelte](https://img.shields.io/badge/Svelte-5-ff3e00.svg)](https://svelte.dev/)
+[![publint](https://img.shields.io/badge/publint-passing-brightgreen.svg)](https://publint.dev/@sourceregistry/sveltekit-oidc)
+
 OIDC authentication helpers for SvelteKit with:
 
 - server-side login, callback, logout, and session refresh flows
 - token endpoint auth support for `none`, `client_secret_basic`, `client_secret_post`, `client_secret_jwt`, and `private_key_jwt`
 - back-channel logout support through a revocation store
-- signed cookie-backed sessions and PKCE/state protection
+- encrypted cookie-backed sessions and PKCE/state protection
 - a `handle` hook for attaching auth state to `event.locals`
 - a small `OIDCContext` provider for client-side auth state and session lifecycle handling
 
@@ -64,7 +71,6 @@ export const GET = oidc.callbackHandler({
 // src/routes/auth/logout/+server.ts
 import { oidc } from '$lib/server/auth';
 
-export const GET = oidc.logoutHandler();
 export const POST = oidc.logoutHandler();
 ```
 
@@ -290,6 +296,7 @@ Set these environment variables to enable it:
 ## Notes
 
 - `cookieSecret` should be a strong random secret and must stay stable across instances.
+- Built-in `returnTo` and logout redirect values are restricted to same-origin paths. Use your own callback `onsuccess` logic if you need custom redirect policy.
 - `clockSkewSeconds` defaults to `30` and tolerates small clock drift between your app and the identity provider.
 - `createInMemoryBackChannelLogoutStore()` is suitable for local development or single-instance deployments. Use Redis, SQL, or another shared store for production.
 - The library validates `id_token` and `logout_token` values through `@sourceregistry/node-jwt` and provider JWKS metadata.

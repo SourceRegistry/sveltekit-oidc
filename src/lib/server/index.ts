@@ -45,6 +45,7 @@ import {
     buildCookieOptions,
     collectGroups,
     createPKCEPair,
+    internalRedirectPath,
     normalizeIssuer,
     normalizeScope,
     parseProviderError,
@@ -346,6 +347,9 @@ export function createOIDC<
         if (transformedClaims.nonce !== nonce) {
             throw error(401, {message: 'Invalid id_token nonce'});
         }
+        if (!transformedClaims.sub) {
+            throw error(401, {message: 'id_token subject is required'});
+        }
 
         return transformedClaims;
     }
@@ -454,7 +458,7 @@ export function createOIDC<
         const pkce = createPKCEPair();
         const state = base64UrlEncode(randomBytes(24));
         const nonce = base64UrlEncode(randomBytes(24));
-        const returnTo = loginOptions.returnTo ?? options.defaultLoginRedirect ?? '/';
+        const returnTo = internalRedirectPath(event, loginOptions.returnTo ?? options.defaultLoginRedirect, '/');
 
         cookieStore.writeState(event.cookies, {
             state,
@@ -515,9 +519,11 @@ export function createOIDC<
             codeVerifier: stateCookie.codeVerifier
         });
 
-        const claims = tokenResponse.id_token
-            ? await validateIdToken(tokenResponse.id_token, stateCookie.nonce)
-            : undefined;
+        if (!tokenResponse.id_token) {
+            throw error(401, {message: 'OIDC callback response must include an id_token'});
+        }
+
+        const claims = await validateIdToken(tokenResponse.id_token, stateCookie.nonce);
         const rawUser =
             options.fetchUserInfo === false
                 ? undefined
@@ -565,15 +571,14 @@ export function createOIDC<
         const session = persisted?.session ?? null;
         cookieStore.clearState(event.cookies);
         await clearPersistedSession(event.cookies, persisted?.id);
+        const postLogoutRedirectPath = internalRedirectPath(
+            event,
+            logoutOptions.postLogoutRedirectUri ?? options.defaultLogoutRedirect ?? options.postLogoutRedirectUri,
+            '/'
+        );
 
         if (logoutOptions.clearSessionOnly || !metadata.end_session_endpoint) {
-            throw redirect(
-                302,
-                logoutOptions.postLogoutRedirectUri ??
-                options.defaultLogoutRedirect ??
-                options.postLogoutRedirectUri ??
-                '/'
-            );
+            throw redirect(302, postLogoutRedirectPath);
         }
 
         const url = new URL(metadata.end_session_endpoint);
@@ -582,13 +587,7 @@ export function createOIDC<
         }
         url.searchParams.set(
             'post_logout_redirect_uri',
-            absoluteUrl(
-                event,
-                logoutOptions.postLogoutRedirectUri ??
-                options.postLogoutRedirectUri ??
-                options.defaultLogoutRedirect ??
-                '/'
-            )
+            absoluteUrl(event, postLogoutRedirectPath)
         );
         if (logoutOptions.state) {
             url.searchParams.set('state', logoutOptions.state);
@@ -636,7 +635,7 @@ export function createOIDC<
         throw redirect(
             302,
             `${absoluteUrl(event, loginPath)}?returnTo=${encodeURIComponent(
-                returnTo ?? `${event.url.pathname}${event.url.search}`
+                internalRedirectPath(event, returnTo ?? `${event.url.pathname}${event.url.search}`, '/')
             )}`
         );
     }
@@ -682,7 +681,7 @@ export function createOIDC<
                     return response;
                 }
 
-                throw redirect(302, handlerOptions.redirectTo ?? result.returnTo);
+                throw redirect(302, internalRedirectPath(event, handlerOptions.redirectTo ?? result.returnTo, '/'));
             } catch (err) {
                 const response = await handlerOptions.onfailure?.(event, err);
                 if (response) {
@@ -696,6 +695,9 @@ export function createOIDC<
 
     function logoutHandler(defaults: OIDCLogoutOptions = {}): RequestHandler {
         return async (event) => {
+            if (event.request.method !== 'POST') {
+                throw error(405, {message: 'Logout requires POST'});
+            }
             const postLogoutRedirectUri =
                 event.url.searchParams.get('postLogoutRedirectUri') ?? defaults.postLogoutRedirectUri;
             const clearSessionOnly =

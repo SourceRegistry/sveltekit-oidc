@@ -1,5 +1,12 @@
 import { error, type RequestEvent } from '@sveltejs/kit';
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+	createCipheriv,
+	createDecipheriv,
+	createHash,
+	createHmac,
+	randomBytes,
+	timingSafeEqual
+} from 'node:crypto';
 
 import type { CookieOptions, OIDCPublicSession, OIDCSession, OIDCUserClaims } from './types.js';
 
@@ -70,18 +77,38 @@ export function verifySignedValue(value: string, secret: string) {
 	return payload;
 }
 
+function cookieEncryptionKey(secret: string) {
+	return createHash('sha256').update(`sveltekit-oidc-cookie:${secret}`).digest();
+}
+
 export function serializeSignedCookie(payload: unknown, secret: string) {
-	return createSignedValue(base64UrlEncode(JSON.stringify(payload)), secret);
+	const iv = randomBytes(12);
+	const cipher = createCipheriv('aes-256-gcm', cookieEncryptionKey(secret), iv);
+	const ciphertext = Buffer.concat([
+		cipher.update(JSON.stringify(payload), 'utf8'),
+		cipher.final()
+	]);
+	const tag = cipher.getAuthTag();
+
+	return `v2.${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
 }
 
 export function parseSignedCookie<T>(value: string | undefined, secret: string): T | null {
 	if (!value) return null;
 
-	const payload = verifySignedValue(value, secret);
-	if (!payload) return null;
+	const parts = value.split('.');
+	if (parts.length !== 4 || parts[0] !== 'v2') return null;
 
 	try {
-		return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as T;
+		const [, iv, tag, ciphertext] = parts;
+		const decipher = createDecipheriv('aes-256-gcm', cookieEncryptionKey(secret), Buffer.from(iv, 'base64url'));
+		decipher.setAuthTag(Buffer.from(tag, 'base64url'));
+		const plaintext = Buffer.concat([
+			decipher.update(Buffer.from(ciphertext, 'base64url')),
+			decipher.final()
+		]);
+
+		return JSON.parse(plaintext.toString('utf8')) as T;
 	} catch {
 		return null;
 	}
@@ -109,6 +136,19 @@ export function parseProviderError(event: RequestEvent) {
 export function absoluteUrl(event: RequestEvent, pathOrUrl: string) {
 	if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
 	return new URL(pathOrUrl, event.url).toString();
+}
+
+export function internalRedirectPath(event: RequestEvent, pathOrUrl: string | undefined, fallback = '/') {
+	if (!pathOrUrl) return fallback;
+
+	try {
+		const url = new URL(pathOrUrl, event.url);
+		if (url.origin !== event.url.origin) return fallback;
+
+		return `${url.pathname}${url.search}${url.hash}`;
+	} catch {
+		return fallback;
+	}
 }
 
 export function toPublicSession<TClaims extends OIDCUserClaims = OIDCUserClaims>(
