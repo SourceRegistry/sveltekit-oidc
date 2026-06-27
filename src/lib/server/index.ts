@@ -642,7 +642,8 @@ export function createOIDC<
     }
 
     const handle: Handle = async ({event, resolve}) => {
-        event.locals.oidc = await hook(event).then(({oidc}) => oidc)
+        const {oidc} = await hook(event);
+        (event.locals as typeof event.locals & { oidc: OIDCHandleLocals<TClaims, TSession> }).oidc = oidc;
         return resolve(event);
     };
 
@@ -662,7 +663,7 @@ export function createOIDC<
                 },
                 clearSession: async () => clearPersistedSession(event.cookies)
             } satisfies OIDCHandleLocals<TClaims, TSession>
-        }
+        };
     }
 
     function loginHandler(defaults: OIDCLoginOptions = {}): RequestHandler {
