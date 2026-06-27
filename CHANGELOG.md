@@ -1,3 +1,10 @@
+## [1.6.5](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.4...v1.6.5) (2026-06-27)
+
+
+### Bug Fixes
+
+* **type:** loosen typings on RequestEvent to allow libraries to use and pass only the required types ([91d1039](https://github.com/SourceRegistry/sveltekit-oidc/commit/91d1039aaa0d07f73a8e06f5836849d8be8ba383))
+
 ## [1.6.4](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.3...v1.6.4) (2026-06-27)
 
 
