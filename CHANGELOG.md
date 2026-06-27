@@ -1,3 +1,10 @@
+## [1.6.3](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.2...v1.6.3) (2026-06-27)
+
+
+### Bug Fixes
+
+* **docs:** hook ([4de9d8a](https://github.com/SourceRegistry/sveltekit-oidc/commit/4de9d8ae23b7ad0e26092c7d5d243f82706648cc))
+
 ## [1.6.2](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.1...v1.6.2) (2026-06-27)
 
 
