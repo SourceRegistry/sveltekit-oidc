@@ -1,3 +1,10 @@
+## [1.6.9](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.8...v1.6.9) (2026-06-28)
+
+
+### Bug Fixes
+
+* **oidc:** prevent session flicker on background revalidation ([847fd6f](https://github.com/SourceRegistry/sveltekit-oidc/commit/847fd6f8c96021d9794c4bce1d02e73cfad6ed2c))
+
 ## [1.6.8](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.7...v1.6.8) (2026-06-28)
 
 
