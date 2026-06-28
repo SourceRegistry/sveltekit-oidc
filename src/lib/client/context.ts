@@ -19,6 +19,7 @@ export type OIDCClientContextValue<TClaims extends OIDCUserClaims = OIDCUserClai
 		| 'backchannel_logout_session_supported'
 	>;
 	status: 'authenticated' | 'unauthenticated' | 'expired' | 'revoked';
+	revalidating: boolean;
 	login: (returnTo?: string) => void;
 	logout: (clearSessionOnly?: boolean) => Promise<void>;
 	revalidate: () => Promise<void>;

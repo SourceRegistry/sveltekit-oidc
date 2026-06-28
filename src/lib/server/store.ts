@@ -34,7 +34,11 @@ export function createInMemorySessionStore<
 	TClaims extends OIDCUserClaims = OIDCUserClaims,
 	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
 >(): OIDCSessionStore<TClaims, TSession> {
-	const sessions = new Map<string, Parameters<OIDCSessionStore<TClaims, TSession>['set']>[1]>();
+	type Sessions = Map<string, Parameters<OIDCSessionStore<TClaims, TSession>['set']>[1]>;
+	// Persist the Map on globalThis so Vite HMR module re-evaluations don't
+	// create a fresh store and orphan all live session cookies.
+	const g = globalThis as Record<string, unknown>;
+	const sessions = (g['__oidc_sessions__'] ??= new Map()) as Sessions;
 
 	return {
 		async get(sessionId) {

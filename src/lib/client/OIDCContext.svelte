@@ -6,7 +6,7 @@
 </script>
 
 <script lang="ts" generics="TClaims extends OIDCUserClaims = OIDCUserClaims">
-    import {invalidateAll} from '$app/navigation';
+    import {invalidateAll, beforeNavigate} from '$app/navigation';
     import {tick} from 'svelte';
     import type {Snippet} from 'svelte';
 
@@ -44,6 +44,7 @@
 
     let iframe = $state<HTMLIFrameElement | undefined>(undefined);
     let status = $state<'authenticated' | 'unauthenticated' | 'expired' | 'revoked'>('unauthenticated');
+    let revalidating = $state(false);
     let handledUnauthenticated = $state(false);
 
     const metadata = $derived(config.metadata);
@@ -76,6 +77,9 @@
         },
         get status() {
             return status;
+        },
+        get revalidating() {
+            return revalidating;
         },
         login: (returnTo?: string) => login(returnTo),
         logout,
@@ -110,7 +114,32 @@
     }
 
     async function revalidate() {
-        await invalidateAll();
+        if (revalidating) return;
+        revalidating = true;
+
+        // If the server redirects to the login path during a background
+        // revalidation (e.g. session lost, HMR store reset), intercept the
+        // SvelteKit router navigation so we can handle it through
+        // handleRedirect instead of a jarring mid-page router transition.
+        let sessionExpiredDuringRevalidation = false;
+        const stopIntercept = beforeNavigate(({ to, cancel }) => {
+            if (to?.url.pathname.startsWith(resolvedLoginPath)) {
+                cancel();
+                sessionExpiredDuringRevalidation = true;
+            }
+        });
+
+        try {
+            await invalidateAll();
+        } finally {
+            stopIntercept();
+            revalidating = false;
+        }
+
+        if (sessionExpiredDuringRevalidation) {
+            status = 'expired';
+            void handleRedirect(redirectOnExpired);
+        }
     }
 
     async function handleRedirect(mode: RedirectMode) {
@@ -132,6 +161,10 @@
 
     $effect(() => {
         const isAuthenticated = Boolean(session?.isAuthenticated);
+        // Suppress authenticated→unauthenticated transition while a revalidation is
+        // in-flight — the effect re-runs once revalidating flips false with the
+        // final session state, preventing a mid-refresh flicker.
+        if (revalidating && !isAuthenticated) return;
         status = isAuthenticated ? 'authenticated' : status === 'authenticated' ? 'unauthenticated' : status;
     });
 
