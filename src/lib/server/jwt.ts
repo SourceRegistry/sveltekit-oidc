@@ -12,8 +12,9 @@ import { base64UrlEncode } from './utils.js';
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	const response = await fetch(url, init);
 	if (!response.ok) {
+		const body = await response.text().catch(() => '');
 		throw error(response.status, {
-			message: `OIDC request failed for '${url}' with status ${response.status}`
+			message: `OIDC request failed for '${url}' with status ${response.status}: ${body}`
 		});
 	}
 

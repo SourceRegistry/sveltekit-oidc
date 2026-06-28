@@ -328,7 +328,7 @@ export type OIDCInstance<
 	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
 > = {
 	handle: Handle;
-	hook: (event: {cookies: RequestEvent['cookies']}) => Promise<{oidc:  OIDCHandleLocals<TClaims, TSession> }>
+	hook: (event: {cookies: RequestEvent['cookies'], locals: App.Locals}) => Promise<{oidc:  OIDCHandleLocals<TClaims, TSession> }>
 	getMetadata: () => Promise<OIDCDiscoveryDocument>;
 	getSession: (event: {cookies: RequestEvent['cookies']}) => Promise<TSession | null>;
 	getPublicSession: (event: {cookies: RequestEvent['cookies']}) => Promise<OIDCPublicSession<TClaims> | null>;

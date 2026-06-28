@@ -626,7 +626,7 @@ export function createOIDC<
         return new Response(null, {status: 200});
     }
 
-    async function requireAuth(event: {url: URL, cookies: RequestEvent['cookies']}, returnTo?: string) {
+    async function requireAuth(event: { url: URL, cookies: RequestEvent['cookies'] }, returnTo?: string) {
         const session = await getSession(event);
         if (session) {
             return session;
@@ -646,9 +646,9 @@ export function createOIDC<
         return resolve(event);
     };
 
-    async function hook(event: { cookies: RequestEvent['cookies'] }) {
+    async function hook(event: { cookies: RequestEvent['cookies'], locals: App.Locals }) {
         const session = await getSession(event);
-        return {
+        const locals = {
             oidc: {
                 isAuthenticated: Boolean(session),
                 session,
@@ -663,6 +663,8 @@ export function createOIDC<
                 clearSession: async () => clearPersistedSession(event.cookies)
             } satisfies OIDCHandleLocals<TClaims, TSession>
         };
+        (event.locals as typeof event.locals & { oidc: OIDCHandleLocals<TClaims, TSession> }).oidc = locals.oidc;
+        return locals;
     }
 
     function loginHandler(defaults: OIDCLoginOptions = {}): RequestHandler {
@@ -677,10 +679,7 @@ export function createOIDC<
             try {
                 const result = await handleCallback(event);
                 const response = await handlerOptions.onsuccess?.(event, result);
-                if (response) {
-                    return response;
-                }
-
+                if (response) return response;
                 throw redirect(302, internalRedirectPath(event, handlerOptions.redirectTo ?? result.returnTo, '/'));
             } catch (err) {
                 const response = await handlerOptions.onfailure?.(event, err);
@@ -762,7 +761,9 @@ export function createOIDC<
         hook,
         getMetadata,
         getSession,
-        getPublicSession: async (event: {cookies: RequestEvent['cookies']}): Promise<OIDCPublicSession<TClaims> | null> =>
+        getPublicSession: async (event: {
+            cookies: RequestEvent['cookies']
+        }): Promise<OIDCPublicSession<TClaims> | null> =>
             toPublicSession(await getSession(event)),
         getSessionManagementConfig,
         login: signIn,
