@@ -1,3 +1,10 @@
+## [1.6.8](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.7...v1.6.8) (2026-06-28)
+
+
+### Bug Fixes
+
+* **hook:** hook didn't set App.Locals['oidc'] now it does ([e83caf2](https://github.com/SourceRegistry/sveltekit-oidc/commit/e83caf28b9640b6b25a8bb3c9807151c419737f7))
+
 ## [1.6.7](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.6...v1.6.7) (2026-06-28)
 
 
