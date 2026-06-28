@@ -646,9 +646,9 @@ export function createOIDC<
         return resolve(event);
     };
 
-    async function hook(event: { cookies: RequestEvent['cookies'] }) {
+    async function hook(event: { cookies: RequestEvent['cookies'], locals: App.Locals }) {
         const session = await getSession(event);
-        return {
+        return (event.locals as typeof event.locals & { oidc: OIDCHandleLocals<TClaims, TSession> }).oidc = {
             oidc: {
                 isAuthenticated: Boolean(session),
                 session,
@@ -677,10 +677,7 @@ export function createOIDC<
             try {
                 const result = await handleCallback(event);
                 const response = await handlerOptions.onsuccess?.(event, result);
-                if (response) {
-                    return response;
-                }
-
+                if (response) return response;
                 throw redirect(302, internalRedirectPath(event, handlerOptions.redirectTo ?? result.returnTo, '/'));
             } catch (err) {
                 const response = await handlerOptions.onfailure?.(event, err);

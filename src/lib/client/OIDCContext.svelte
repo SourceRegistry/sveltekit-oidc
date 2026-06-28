@@ -6,7 +6,8 @@
 </script>
 
 <script lang="ts" generics="TClaims extends OIDCUserClaims = OIDCUserClaims">
-    import {goto, invalidateAll} from '$app/navigation';
+    import {invalidateAll} from '$app/navigation';
+    import {tick} from 'svelte';
     import type {Snippet} from 'svelte';
 
     import {setOIDCContext} from './context.js';
@@ -21,6 +22,7 @@
         checkSessionIntervalMs = 5000,
         monitorSession = true,
         revalidateIntervalMs = 30000,
+        renewalLeadTimeMs = 5000,
         redirectOnExpired = 'login',
         redirectOnRevoked = 'login',
         redirectIfUnauthenticated = false,
@@ -33,6 +35,7 @@
         checkSessionIntervalMs?: number;
         monitorSession?: boolean;
         revalidateIntervalMs?: number;
+        renewalLeadTimeMs?: number;
         redirectOnExpired?: RedirectMode;
         redirectOnRevoked?: RedirectMode;
         redirectIfUnauthenticated?: boolean;
@@ -101,7 +104,9 @@
     }
 
     function login(returnTo?: string) {
-        void goto(buildLoginUrl(returnTo), {invalidateAll: false});
+        // loginPath is a plain +server.ts redirect endpoint, not a routable
+        // page — use a full browser navigation, not SvelteKit's goto().
+        window.location.href = buildLoginUrl(returnTo);
     }
 
     async function revalidate() {
@@ -130,17 +135,39 @@
         status = isAuthenticated ? 'authenticated' : status === 'authenticated' ? 'unauthenticated' : status;
     });
 
+    let lastExpiresAt: number | undefined;
+    let renewalAttemptedForExpiresAt: number | undefined;
+
     $effect(() => {
         if (!session?.isAuthenticated || !session.expiresAt) {
             return;
         }
 
-        const timeoutMs = Math.max(0, session.expiresAt * 1000 - Date.now());
+        // If a prior revalidate already came back with the same (still-past)
+        // expiresAt, the server couldn't refresh the token (e.g. no refresh
+        // token available) — retrying immediately forever would spin-loop.
+        // Treat that as a hard expiry instead of rescheduling.
+        if (
+            lastExpiresAt !== undefined &&
+            session.expiresAt <= lastExpiresAt &&
+            session.expiresAt * 1000 <= Date.now()
+        ) {
+            status = 'expired';
+            void handleRedirect(redirectOnExpired);
+            return;
+        }
+        lastExpiresAt = session.expiresAt;
+
+        const expiresAt = session.expiresAt;
+        const leadTimeMs = renewalAttemptedForExpiresAt === expiresAt ? 0 : renewalLeadTimeMs;
+        const timeoutMs = Math.max(0, expiresAt * 1000 - Date.now() - leadTimeMs);
         const timer = window.setTimeout(async () => {
             // Silent revalidate first — server's maybeRefreshSession will refresh
             // the token if a valid refresh_token exists. Only redirect if the
             // session comes back unauthenticated after that.
+            renewalAttemptedForExpiresAt = expiresAt;
             await revalidate();
+            await tick();
             if (!session?.isAuthenticated) {
                 status = 'expired';
                 void handleRedirect(redirectOnExpired);
