@@ -1,3 +1,10 @@
+## [1.6.11](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.10...v1.6.11) (2026-07-12)
+
+
+### Bug Fixes
+
+* logout bug ([8918ae5](https://github.com/SourceRegistry/sveltekit-oidc/commit/8918ae5ba3d6cde3d0b2546050b9cc9a82523fa5))
+
 ## [1.6.10](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.9...v1.6.10) (2026-07-12)
 
 
