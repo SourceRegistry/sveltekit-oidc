@@ -73,6 +73,7 @@ export type OIDCUserClaims = Record<string, unknown> & {
 	iss?: string;
 	aud?: string | string[];
 	exp?: number;
+	iat?: number;
 	nbf?: number;
 	nonce?: string;
 };
@@ -213,6 +214,8 @@ export type OIDCOptions<
 	cookieOptions?: Partial<CookieOptions>;
 	clockSkewSeconds?: number;
 	refreshToleranceSeconds?: number;
+	/** Maximum lifetime of a local browser session. Defaults to 8 hours. */
+	sessionMaxAgeSeconds?: number;
 	defaultLoginRedirect?: string;
 	defaultLogoutRedirect?: string;
 	sessionStore?: OIDCSessionStore<TClaims, TSession> | 'memory';
@@ -234,6 +237,13 @@ export type OIDCOptions<
 	) => MaybePromise<TSession>;
 	endpoints?: Partial<OIDCDiscoveryDocument>;
 	logger?: OIDCLogger | false;
+	/**
+	 * Custom fetch implementation used for all OIDC network calls
+	 * (discovery, token, userinfo, JWKS). Useful in dev to work around
+	 * self-signed certs via a custom https.Agent — do not disable
+	 * TLS verification in production.
+	 */
+	fetch?: typeof fetch;
 };
 
 export type OIDCLoginOptions = {

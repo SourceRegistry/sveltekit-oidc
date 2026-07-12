@@ -298,8 +298,9 @@ Set these environment variables to enable it:
 - `cookieSecret` should be a strong random secret and must stay stable across instances.
 - Built-in `returnTo` and logout redirect values are restricted to same-origin paths. Use your own callback `onsuccess` logic if you need custom redirect policy.
 - `clockSkewSeconds` defaults to `30` and tolerates small clock drift between your app and the identity provider.
+- Local browser sessions expire after 8 hours by default (`sessionMaxAgeSeconds`). They also end when an unrefreshable access token expires; set a shorter value for higher-risk applications.
 - `createInMemoryBackChannelLogoutStore()` is suitable for local development or single-instance deployments. Use Redis, SQL, or another shared store for production.
-- The library validates `id_token` and `logout_token` values through `@sourceregistry/node-jwt` and provider JWKS metadata.
+- The library validates `id_token` and `logout_token` values through `@sourceregistry/node-jwt` and provider JWKS metadata. ID tokens must contain `exp`, `iat`, and a matching nonce; UserInfo subjects must match the validated ID token.
 - `groups` are normalized onto the session from `groups` and `roles` claims when present.
 - Use `transformClaims`, `transformUser`, and `transformSession` to project provider-specific claims into your own session shape.
 - `check_session_iframe` monitoring only runs when `monitorSession` is enabled, the provider advertises that endpoint, and the session includes `session_state`.

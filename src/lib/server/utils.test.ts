@@ -6,7 +6,9 @@ import {
 	internalRedirectPath,
 	normalizeScope,
 	parseSignedCookie,
-	serializeSignedCookie
+	serializeSignedCookie,
+	validateIdTokenClaims,
+	validateUserInfoSubject
 } from './utils.js';
 
 describe('normalizeScope', () => {
@@ -86,5 +88,34 @@ describe('internalRedirectPath', () => {
 	it('rejects external redirects', () => {
 		expect(internalRedirectPath(event, 'https://attacker.example.test/phish', '/')).toBe('/');
 		expect(internalRedirectPath(event, '//attacker.example.test/phish', '/')).toBe('/');
+	});
+});
+
+describe('OIDC identity validation', () => {
+	const claims = {sub: 'user-1', nonce: 'nonce', exp: 200, iat: 100};
+	const failureMessage = (action: () => void) => {
+		try {
+			action();
+		} catch (err) {
+			return (err as {body: {message: string}}).body.message;
+		}
+		throw new Error('Expected validation to fail');
+	};
+
+	it('requires the standard ID token security claims before transformation', () => {
+		expect(() => validateIdTokenClaims(claims, 'nonce')).not.toThrow();
+		expect(failureMessage(() => validateIdTokenClaims({...claims, exp: undefined}, 'nonce'))).toBe(
+			'id_token expiration is required'
+		);
+		expect(failureMessage(() => validateIdTokenClaims({...claims, iat: undefined}, 'nonce'))).toBe(
+			'id_token issued-at time is required'
+		);
+	});
+
+	it('rejects UserInfo claims for a different subject', () => {
+		expect(() => validateUserInfoSubject(claims, {sub: 'user-1'})).not.toThrow();
+		expect(failureMessage(() => validateUserInfoSubject(claims, {sub: 'user-2'}))).toBe(
+			'UserInfo subject does not match id_token subject'
+		);
 	});
 });

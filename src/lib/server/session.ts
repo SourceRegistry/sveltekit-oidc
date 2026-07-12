@@ -30,3 +30,19 @@ export function shouldRefresh<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 
 	return session.tokens.expiresAt - refreshToleranceSeconds <= now;
 }
+
+export function isSessionExpired<TClaims extends OIDCUserClaims = OIDCUserClaims>(
+	session: OIDCSession<TClaims>,
+	sessionMaxAgeSeconds: number,
+	now = Math.floor(Date.now() / 1000)
+) {
+	if (session.createdAt + sessionMaxAgeSeconds <= now) {
+		return true;
+	}
+
+	// Without a refresh token, an expired access token cannot establish that
+	// the user's session is still valid. Do not keep the local session alive.
+	return !session.tokens.refreshToken &&
+		session.tokens.expiresAt !== undefined &&
+		session.tokens.expiresAt <= now;
+}

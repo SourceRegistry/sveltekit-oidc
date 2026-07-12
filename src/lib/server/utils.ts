@@ -151,6 +151,27 @@ export function internalRedirectPath(event: {url: URL}, pathOrUrl: string | unde
 	}
 }
 
+export function validateIdTokenClaims(claims: OIDCUserClaims, nonce: string) {
+	if (!Number.isFinite(claims.exp)) {
+		throw error(401, {message: 'id_token expiration is required'});
+	}
+	if (!Number.isFinite(claims.iat)) {
+		throw error(401, {message: 'id_token issued-at time is required'});
+	}
+	if (claims.nonce !== nonce) {
+		throw error(401, {message: 'Invalid id_token nonce'});
+	}
+	if (!claims.sub) {
+		throw error(401, {message: 'id_token subject is required'});
+	}
+}
+
+export function validateUserInfoSubject(claims: OIDCUserClaims, user: OIDCUserClaims | undefined) {
+	if (user && user.sub !== claims.sub) {
+		throw error(401, {message: 'UserInfo subject does not match id_token subject'});
+	}
+}
+
 export function toPublicSession<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 	session: OIDCSession<TClaims> | null
 ): OIDCPublicSession<TClaims> | null {

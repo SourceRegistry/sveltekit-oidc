@@ -9,8 +9,12 @@ import type {
 } from './types.js';
 import { base64UrlEncode } from './utils.js';
 
-export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-	const response = await fetch(url, init);
+export async function fetchJson<T>(
+	url: string,
+	init?: RequestInit,
+	fetchImpl: typeof fetch = fetch
+): Promise<T> {
+	const response = await fetchImpl(url, init);
 	if (!response.ok) {
 		const body = await response.text().catch(() => '');
 		throw error(response.status, {

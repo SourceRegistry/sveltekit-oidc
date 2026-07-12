@@ -17,7 +17,7 @@ import {
     createPrivateKeyJwtAssertion,
     fetchJson
 } from './jwt.js';
-import {normalizeTokens, shouldRefresh} from './session.js';
+import {isSessionExpired, normalizeTokens, shouldRefresh} from './session.js';
 import type {
     OIDCActionOptions,
     OIDCBackChannelLogoutClaims,
@@ -49,7 +49,9 @@ import {
     normalizeIssuer,
     normalizeScope,
     parseProviderError,
-    toPublicSession
+    toPublicSession,
+    validateIdTokenClaims,
+    validateUserInfoSubject
 } from './utils.js';
 
 export type * from './types.js';
@@ -91,6 +93,10 @@ export function createOIDC<
     const cookieOptions = buildCookieOptions(options.cookieOptions);
     const clockSkewSeconds = options.clockSkewSeconds ?? 30;
     const refreshToleranceSeconds = options.refreshToleranceSeconds ?? 30;
+    const sessionMaxAgeSeconds = options.sessionMaxAgeSeconds ?? 60 * 60 * 8;
+    if (!Number.isFinite(sessionMaxAgeSeconds) || sessionMaxAgeSeconds <= 0) {
+        throw new TypeError('sessionMaxAgeSeconds must be a positive finite number');
+    }
     const sessionCookieName = options.sessionCookieName ?? 'oidc_session';
     const stateCookieName = options.stateCookieName ?? 'oidc_auth_state';
     const defaultScope = normalizeScope(options.scope);
@@ -98,6 +104,7 @@ export function createOIDC<
     const redirectPath = options.redirectPath ?? '/auth/callback';
     const clientAuthMethod: OIDCClientAuthMethod =
         options.clientAuthMethod ?? (options.clientSecret ? 'client_secret_basic' : 'none');
+    const fetchImpl: typeof fetch = options.fetch ?? fetch;
 
     const cookieStore = createOIDCCookieStore<TClaims, TSession>(
         options.cookieSecret,
@@ -184,7 +191,7 @@ export function createOIDC<
                     throw error(500, {message: 'OIDC issuer or discoveryUrl must be configured'});
                 }
 
-                const document = await fetchJson<OIDCDiscoveryDocument>(discoveryUrl);
+                const document = await fetchJson<OIDCDiscoveryDocument>(discoveryUrl, undefined, fetchImpl);
                 return {
                     ...document,
                     ...options.endpoints,
@@ -203,7 +210,7 @@ export function createOIDC<
                     throw error(500, {message: 'OIDC jwks_uri is required to validate id_token values'});
                 }
 
-                return fromWeb(metadata.jwks_uri, {overrideEndpointCheck: true});
+                return fromWeb(metadata.jwks_uri, {overrideEndpointCheck: true, fetch: fetchImpl});
             });
         }
 
@@ -317,7 +324,7 @@ export function createOIDC<
             method: 'POST',
             headers: auth.headers,
             body: auth.body
-        });
+        }, fetchImpl);
     }
 
     async function refreshTokens(refreshToken: string) {
@@ -330,7 +337,7 @@ export function createOIDC<
             method: 'POST',
             headers: auth.headers,
             body: auth.body
-        });
+        }, fetchImpl);
     }
 
     async function validateIdToken(idToken: string, nonce: string) {
@@ -341,15 +348,10 @@ export function createOIDC<
             algorithms: metadata.id_token_signing_alg_values_supported as SupportedAlgorithm[] | undefined,
             clockSkew: clockSkewSeconds
         });
+        validateIdTokenClaims(claims, nonce);
         const transformedClaims = options.transformClaims
             ? await options.transformClaims(claims)
             : (claims as TClaims);
-        if (transformedClaims.nonce !== nonce) {
-            throw error(401, {message: 'Invalid id_token nonce'});
-        }
-        if (!transformedClaims.sub) {
-            throw error(401, {message: 'id_token subject is required'});
-        }
 
         return transformedClaims;
     }
@@ -384,7 +386,7 @@ export function createOIDC<
             headers: {
                 authorization: `Bearer ${accessToken}`
             }
-        });
+        }, fetchImpl);
     }
 
     async function isRevoked(session: TSession | null) {
@@ -403,6 +405,10 @@ export function createOIDC<
         if (!session) {
             return null;
         }
+        if (isSessionExpired(session, sessionMaxAgeSeconds)) {
+            await clearPersistedSession(cookies, persisted?.id);
+            return null;
+        }
         if (await isRevoked(session)) {
             await clearPersistedSession(cookies, persisted?.id);
             return null;
@@ -418,6 +424,9 @@ export function createOIDC<
                 : session.claims;
             const rawUser =
                 options.fetchUserInfo !== false ? await fetchUserInfo(tokenResponse.access_token) : session.user;
+            if (claims) {
+                validateUserInfoSubject(claims, rawUser);
+            }
             const user = options.transformUser
                 ? await options.transformUser(rawUser, {claims})
                 : (rawUser as TClaims | undefined);
@@ -528,6 +537,7 @@ export function createOIDC<
             options.fetchUserInfo === false
                 ? undefined
                 : await fetchUserInfo(tokenResponse.access_token).catch(() => undefined);
+        validateUserInfoSubject(claims, rawUser);
         const user = options.transformUser
             ? await options.transformUser(rawUser, {claims})
             : (rawUser as TClaims | undefined);

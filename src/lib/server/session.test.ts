@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeTokens, shouldRefresh } from './session.js';
+import { isSessionExpired, normalizeTokens, shouldRefresh } from './session.js';
 import type { OIDCSession } from './types.js';
 
 describe('normalizeTokens', () => {
@@ -72,5 +72,31 @@ describe('shouldRefresh', () => {
 
 		expect(shouldRefresh(session, 30, 91)).toBe(true);
 		expect(shouldRefresh(session, 30, 80)).toBe(false);
+	});
+});
+
+describe('isSessionExpired', () => {
+	const session = {
+		issuer: 'https://issuer.example',
+		clientId: 'client',
+		groups: [],
+		tokens: {accessToken: 'access', tokenType: 'Bearer', scope: ['openid']},
+		createdAt: 100,
+		refreshedAt: 100
+	} satisfies OIDCSession;
+
+	it('enforces the local session maximum age', () => {
+		expect(isSessionExpired(session, 300, 399)).toBe(false);
+		expect(isSessionExpired(session, 300, 400)).toBe(true);
+	});
+
+	it('expires an unrefreshable session with its access token', () => {
+		const unrefreshableSession = {
+			...session,
+			tokens: {...session.tokens, expiresAt: 200}
+		};
+
+		expect(isSessionExpired(unrefreshableSession, 1000, 199)).toBe(false);
+		expect(isSessionExpired(unrefreshableSession, 1000, 200)).toBe(true);
 	});
 });
