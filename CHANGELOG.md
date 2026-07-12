@@ -1,3 +1,10 @@
+## [1.6.10](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.9...v1.6.10) (2026-07-12)
+
+
+### Bug Fixes
+
+* harden OIDC session validation ([4d27f01](https://github.com/SourceRegistry/sveltekit-oidc/commit/4d27f013d39cb77163f7608a58ef9a3b029f74a4))
+
 ## [1.6.9](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.8...v1.6.9) (2026-06-28)
 
 
