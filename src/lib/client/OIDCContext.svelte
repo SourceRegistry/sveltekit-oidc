@@ -46,6 +46,7 @@
     let status = $state<'authenticated' | 'unauthenticated' | 'expired' | 'revoked'>('unauthenticated');
     let revalidating = $state(false);
     let handledUnauthenticated = $state(false);
+    let sessionExpiredDuringRevalidation = false;
 
     const metadata = $derived(config.metadata);
     const resolvedLoginPath = $derived(loginPath ?? config.loginPath ?? '/auth/login');
@@ -88,23 +89,43 @@
 
     void context;
 
+    // SvelteKit navigation hooks are registered for the component lifetime.
+    // Only intercept login redirects while a background revalidation is active.
+    beforeNavigate(({to, cancel}) => {
+        if (revalidating && to?.url.pathname.startsWith(resolvedLoginPath)) {
+            cancel();
+            sessionExpiredDuringRevalidation = true;
+        }
+    });
+
     function buildLoginUrl(returnTo = `${window.location.pathname}${window.location.search}`) {
         return `${resolvedLoginPath}?returnTo=${encodeURIComponent(returnTo)}`;
     }
 
     async function logout(clearSessionOnly = false) {
-        const body = new URLSearchParams();
         if (clearSessionOnly) {
-            body.set('clearSessionOnly', '1');
+            // Session-monitor events must clear only this application's session.
+            // Keep the flag in the URL because logoutHandler also supports callers
+            // that do not send a form body.
+            const url = new URL(logoutPath, window.location.href);
+            url.searchParams.set('clearSessionOnly', '1');
+
+            await fetch(url, {
+                method: 'POST',
+                redirect: 'manual'
+            });
+            return;
         }
 
-        await fetch(logoutPath, {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/x-www-form-urlencoded'
-            },
-            body
-        });
+        // Provider logout can include an interactive confirmation and redirects.
+        // A fetch would follow that flow in the background, leaving the provider
+        // session intact and allowing the app to immediately sign in again.
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = logoutPath;
+        form.style.display = 'none';
+        document.body.append(form);
+        form.submit();
     }
 
     function login(returnTo?: string) {
@@ -118,21 +139,13 @@
         revalidating = true;
 
         // If the server redirects to the login path during a background
-        // revalidation (e.g. session lost, HMR store reset), intercept the
-        // SvelteKit router navigation so we can handle it through
-        // handleRedirect instead of a jarring mid-page router transition.
-        let sessionExpiredDuringRevalidation = false;
-        const stopIntercept = beforeNavigate(({ to, cancel }) => {
-            if (to?.url.pathname.startsWith(resolvedLoginPath)) {
-                cancel();
-                sessionExpiredDuringRevalidation = true;
-            }
-        });
+        // revalidation (e.g. session lost, HMR store reset), the component's
+        // navigation hook records it so we can handle the redirect below.
+        sessionExpiredDuringRevalidation = false;
 
         try {
             await invalidateAll();
         } finally {
-            stopIntercept();
             revalidating = false;
         }
 

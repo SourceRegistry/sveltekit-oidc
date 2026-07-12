@@ -1,22 +1,18 @@
 import {
-    error,
-    redirect,
     type Action,
+    type Cookies,
+    error,
     type Handle,
+    redirect,
     type RequestEvent,
-    type RequestHandler, type Cookies
+    type RequestHandler
 } from '@sveltejs/kit';
 import {randomBytes} from 'node:crypto';
 import {decode, fromWeb, verify} from '@sourceregistry/node-jwt/promises';
 import type {JWKSResolver, JWT as JSONWebToken} from '@sourceregistry/node-jwt';
 
 import {createOIDCCookieStore} from './cookies.js';
-import {
-    asAuthorizationHeader,
-    createClientSecretJwtAssertion,
-    createPrivateKeyJwtAssertion,
-    fetchJson
-} from './jwt.js';
+import {asAuthorizationHeader, createClientSecretJwtAssertion, createPrivateKeyJwtAssertion, fetchJson} from './jwt.js';
 import {isSessionExpired, normalizeTokens, shouldRefresh} from './session.js';
 import type {
     OIDCActionOptions,
@@ -26,11 +22,11 @@ import type {
     OIDCClientAuthMethod,
     OIDCDiscoveryDocument,
     OIDCHandleLocals,
+    OIDCInstance,
     OIDCLogger,
     OIDCLoginOptions,
     OIDCLogoutOptions,
     OIDCOptions,
-    OIDCInstance,
     OIDCPersistedSession,
     OIDCPublicSession,
     OIDCSession,
@@ -53,11 +49,10 @@ import {
     validateIdTokenClaims,
     validateUserInfoSubject
 } from './utils.js';
+import {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
 
 export type * from './types.js';
 export {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
-
-import {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
 
 function buildLogger(logger: OIDCLogger | false | undefined): Required<OIDCLogger> {
     const noop = () => {
@@ -349,11 +344,9 @@ export function createOIDC<
             clockSkew: clockSkewSeconds
         });
         validateIdTokenClaims(claims, nonce);
-        const transformedClaims = options.transformClaims
+        return options.transformClaims
             ? await options.transformClaims(claims)
             : (claims as TClaims);
-
-        return transformedClaims;
     }
 
     async function validateBackChannelLogoutToken(logoutToken: string) {
@@ -707,11 +700,16 @@ export function createOIDC<
             if (event.request.method !== 'POST') {
                 throw error(405, {message: 'Logout requires POST'});
             }
+            const form = await event.request.formData().catch(() => null);
             const postLogoutRedirectUri =
-                event.url.searchParams.get('postLogoutRedirectUri') ?? defaults.postLogoutRedirectUri;
+                event.url.searchParams.get('postLogoutRedirectUri') ??
+                form?.get('postLogoutRedirectUri')?.toString() ??
+                defaults.postLogoutRedirectUri;
             const clearSessionOnly =
                 event.url.searchParams.get('clearSessionOnly') === '1' ||
                 event.url.searchParams.get('clearSessionOnly') === 'true' ||
+                form?.get('clearSessionOnly')?.toString() === '1' ||
+                form?.get('clearSessionOnly')?.toString() === 'true' ||
                 defaults.clearSessionOnly;
 
             return signOut(event, {...defaults, postLogoutRedirectUri, clearSessionOnly});
