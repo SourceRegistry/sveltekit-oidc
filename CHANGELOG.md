@@ -1,3 +1,10 @@
+## [1.6.12](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.11...v1.6.12) (2026-07-13)
+
+
+### Bug Fixes
+
+* stripped typings to bare minimum for requestHandlers when integrating with libraries ([824de32](https://github.com/SourceRegistry/sveltekit-oidc/commit/824de3250f7ece50e659cf2699ba49ff969d68c7))
+
 ## [1.6.11](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.10...v1.6.11) (2026-07-12)
 
 
