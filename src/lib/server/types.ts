@@ -104,6 +104,8 @@ export type OIDCPublicSession<TClaims extends OIDCUserClaims = OIDCUserClaims> =
 	sessionState?: string;
 	sid?: string;
 	sub?: string;
+	/** SvelteKit dependency registered by getPublicSession for targeted client revalidation. */
+	revalidationDependency?: string;
 };
 
 export type OIDCBackChannelLogoutClaims = Record<string, unknown> & {
@@ -168,7 +170,9 @@ export type OIDCSessionStore<
 
 export type OIDCSessionManagementConfig = {
 	clientId: string;
+	issuer: string;
 	loginPath: string;
+	logoutPath: string;
 	redirectPath: string;
 	metadata: Pick<
 		OIDCDiscoveryDocument,
@@ -203,6 +207,7 @@ export type OIDCOptions<
 	clientSecretJwt?: OIDCClientSecretJwtOptions;
 	privateKeyJwt?: OIDCPrivateKeyJwtOptions;
 	loginPath?: string;
+	logoutPath?: string;
 	redirectPath?: string;
 	postLogoutRedirectUri?: string;
 	scope?: string | string[];
@@ -345,7 +350,10 @@ export type OIDCInstance<
 	hook: (event: {cookies: Cookies, locals: App.Locals}) => Promise<{oidc:  OIDCHandleLocals<TClaims, TSession> }>
 	getMetadata: () => Promise<OIDCDiscoveryDocument>;
 	getSession: (event: {cookies: Cookies}) => Promise<TSession | null>;
-	getPublicSession: (event: {cookies: Cookies}) => Promise<OIDCPublicSession<TClaims> | null>;
+	getPublicSession: (event: {
+		cookies: Cookies;
+		depends?: (dependency: string) => void;
+	}) => Promise<OIDCPublicSession<TClaims> | null>;
 	getSessionManagementConfig: () => Promise<OIDCSessionManagementConfig>;
 	login: (event: MinimalRequestEvent, loginOptions?: OIDCLoginOptions) => Promise<never>;
 	logout: (event: MinimalRequestEvent, logoutOptions?: OIDCLogoutOptions) => Promise<never>;

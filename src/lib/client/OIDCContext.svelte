@@ -6,7 +6,7 @@
 </script>
 
 <script lang="ts" generics="TClaims extends OIDCUserClaims = OIDCUserClaims">
-    import {invalidateAll, beforeNavigate} from '$app/navigation';
+    import {beforeNavigate, invalidate, invalidateAll} from '$app/navigation';
     import {tick} from 'svelte';
     import type {Snippet} from 'svelte';
 
@@ -14,18 +14,24 @@
 
     type RedirectMode = 'login' | 'logout' | 'reload' | 'none';
 
+    type OIDCClientDebugEvent = {
+        type: string;
+        details?: Record<string, unknown>;
+    };
+
     let {
         session = null,
         config,
         loginPath,
-        logoutPath = '/auth/logout',
+        logoutPath,
         checkSessionIntervalMs = 5000,
         monitorSession = true,
-        revalidateIntervalMs = 30000,
+        revalidateIntervalMs = 0,
         renewalLeadTimeMs = 5000,
         redirectOnExpired = 'login',
         redirectOnRevoked = 'login',
         redirectIfUnauthenticated = false,
+        onDebug,
         children
     }: {
         session?: OIDCPublicSession<TClaims> | null;
@@ -39,6 +45,8 @@
         redirectOnExpired?: RedirectMode;
         redirectOnRevoked?: RedirectMode;
         redirectIfUnauthenticated?: boolean;
+        /** Receives token-safe lifecycle events for diagnosing session changes. */
+        onDebug?: (event: OIDCClientDebugEvent) => void;
         children?: Snippet;
     } = $props();
 
@@ -48,8 +56,13 @@
     let handledUnauthenticated = $state(false);
     let sessionExpiredDuringRevalidation = false;
 
+    function debug(type: string, details?: Record<string, unknown>) {
+        onDebug?.({type, details});
+    }
+
     const metadata = $derived(config.metadata);
     const resolvedLoginPath = $derived(loginPath ?? config.loginPath ?? '/auth/login');
+    const resolvedLogoutPath = $derived(logoutPath ?? config.logoutPath ?? '/auth/logout');
     const iframeUrl = $derived(
         config.metadata.check_session_iframe ?? config.checkSessionIframe ?? undefined
     );
@@ -73,6 +86,9 @@
         get groups() {
             return session?.groups ?? [];
         },
+        get issuer() {
+            return config.issuer;
+        },
         get metadata() {
             return metadata;
         },
@@ -93,6 +109,7 @@
     // Only intercept login redirects while a background revalidation is active.
     beforeNavigate(({to, cancel}) => {
         if (revalidating && to?.url.pathname.startsWith(resolvedLoginPath)) {
+            debug('revalidation_redirected_to_login', {pathname: to.url.pathname});
             cancel();
             sessionExpiredDuringRevalidation = true;
         }
@@ -104,10 +121,11 @@
 
     async function logout(clearSessionOnly = false) {
         if (clearSessionOnly) {
+            debug('local_session_logout_requested');
             // Session-monitor events must clear only this application's session.
             // Keep the flag in the URL because logoutHandler also supports callers
             // that do not send a form body.
-            const url = new URL(logoutPath, window.location.href);
+            const url = new URL(resolvedLogoutPath, window.location.href);
             url.searchParams.set('clearSessionOnly', '1');
 
             await fetch(url, {
@@ -122,20 +140,25 @@
         // session intact and allowing the app to immediately sign in again.
         const form = document.createElement('form');
         form.method = 'POST';
-        form.action = logoutPath;
+        form.action = resolvedLogoutPath;
         form.style.display = 'none';
         document.body.append(form);
         form.submit();
     }
 
     function login(returnTo?: string) {
+        debug('login_redirect_requested', {returnTo: returnTo ?? `${window.location.pathname}${window.location.search}`});
         // loginPath is a plain +server.ts redirect endpoint, not a routable
         // page — use a full browser navigation, not SvelteKit's goto().
         window.location.href = buildLoginUrl(returnTo);
     }
 
     async function revalidate() {
-        if (revalidating) return;
+        if (revalidating) {
+            debug('revalidation_skipped_in_flight');
+            return;
+        }
+        debug('revalidation_started', {expiresAt: session?.expiresAt});
         revalidating = true;
 
         // If the server redirects to the login path during a background
@@ -144,14 +167,25 @@
         sessionExpiredDuringRevalidation = false;
 
         try {
-            await invalidateAll();
+            if (session?.revalidationDependency) {
+                debug('revalidation_dependency_invalidated', {
+                    dependency: session.revalidationDependency
+                });
+                await invalidate(session.revalidationDependency);
+            } else {
+                debug('revalidation_fallback_invalidated_all');
+                await invalidateAll();
+            }
         } finally {
             revalidating = false;
         }
 
         if (sessionExpiredDuringRevalidation) {
             status = 'expired';
+            debug('revalidation_session_expired');
             void handleRedirect(redirectOnExpired);
+        } else {
+            debug('revalidation_completed', {isAuthenticated: Boolean(session?.isAuthenticated), expiresAt: session?.expiresAt});
         }
     }
 
@@ -199,6 +233,7 @@
             session.expiresAt * 1000 <= Date.now()
         ) {
             status = 'expired';
+            debug('session_expired_after_failed_renewal', {expiresAt: session.expiresAt});
             void handleRedirect(redirectOnExpired);
             return;
         }
@@ -208,6 +243,7 @@
         const leadTimeMs = renewalAttemptedForExpiresAt === expiresAt ? 0 : renewalLeadTimeMs;
         const timeoutMs = Math.max(0, expiresAt * 1000 - Date.now() - leadTimeMs);
         const timer = window.setTimeout(async () => {
+            debug('token_renewal_due', {expiresAt});
             // Silent revalidate first — server's maybeRefreshSession will refresh
             // the token if a valid refresh_token exists. Only redirect if the
             // session comes back unauthenticated after that.
@@ -216,6 +252,7 @@
             await tick();
             if (!session?.isAuthenticated) {
                 status = 'expired';
+                debug('token_renewal_left_session_unauthenticated');
                 void handleRedirect(redirectOnExpired);
             }
         }, timeoutMs);
@@ -268,6 +305,7 @@
                 return;
             }
             if (event.data === 'changed' || event.data === 'error') {
+                debug('iframe_session_event', {result: event.data, origin: event.origin});
                 status = 'revoked';
                 void logout(true).then(() => handleRedirect(redirectOnRevoked));
             }

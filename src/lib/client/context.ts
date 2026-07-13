@@ -10,6 +10,7 @@ export type OIDCClientContextValue<TClaims extends OIDCUserClaims = OIDCUserClai
 	user: OIDCPublicSession<TClaims>['user'];
 	claims: OIDCPublicSession<TClaims>['claims'];
 	groups: OIDCPublicSession<TClaims>['groups'];
+	issuer: string;
 	metadata?: Pick<
 		OIDCDiscoveryDocument,
 		| 'issuer'

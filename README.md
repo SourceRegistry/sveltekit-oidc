@@ -147,8 +147,18 @@ export async function load(event) {
 
 - local expiry redirects
 - `check_session_iframe` polling when the provider advertises it
-- periodic `invalidateAll()` revalidation so revoked server sessions are detected
+- targeted session revalidation when a token reaches its renewal window
+- optional periodic session revalidation when `revalidateIntervalMs` is explicitly configured
 - a client context for nested auth-aware components through `useOIDC()` / `getOIDCContext()`
+
+`oidc.getPublicSession(event)` automatically registers the `oidc:session` dependency used by
+`OIDCContext`, so the standard setup above does not re-run unrelated page loads. If you destructure
+the load event, pass both `cookies` and `depends`: `oidc.getPublicSession({cookies, depends})`.
+
+Periodic revalidation is disabled by default to avoid unnecessary page updates. Set
+`revalidateIntervalMs` to a positive interval only when you need polling in addition to token-expiry
+and provider session monitoring. Existing integrations that pass only `cookies` remain compatible;
+their expiry-driven revalidation falls back to `invalidateAll()`.
 
 Set `monitorSession={false}` when you want to keep the client context but leave remote session
 revocation checks to your server-side guard or another mechanism. This disables

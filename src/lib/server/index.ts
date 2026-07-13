@@ -54,6 +54,8 @@ import {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from '
 export type * from './types.js';
 export {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
 
+const OIDC_SESSION_REVALIDATION_DEPENDENCY = 'oidc:session';
+
 function buildLogger(logger: OIDCLogger | false | undefined): Required<OIDCLogger> {
     const noop = () => {
     };
@@ -96,6 +98,7 @@ export function createOIDC<
     const stateCookieName = options.stateCookieName ?? 'oidc_auth_state';
     const defaultScope = normalizeScope(options.scope);
     const loginPath = options.loginPath ?? '/auth/login';
+    const logoutPath = options.logoutPath ?? '/auth/logout';
     const redirectPath = options.redirectPath ?? '/auth/callback';
     const clientAuthMethod: OIDCClientAuthMethod =
         options.clientAuthMethod ?? (options.clientSecret ? 'client_secret_basic' : 'none');
@@ -121,11 +124,13 @@ export function createOIDC<
 
         const reference = cookieStore.readSessionReference(cookies);
         if (!reference?.id) {
+            log.debug('No OIDC session reference cookie is present');
             return null;
         }
 
         const session = await sessionStore.get(reference.id);
         if (!session) {
+            log.debug('OIDC session reference has no matching persisted session');
             cookieStore.clearSessionReference(cookies);
             return null;
         }
@@ -399,10 +404,24 @@ export function createOIDC<
             return null;
         }
         if (isSessionExpired(session, sessionMaxAgeSeconds)) {
+            const now = Math.floor(Date.now() / 1000);
+            log.debug('OIDC session expired — clearing session', {
+                reason: session.createdAt + sessionMaxAgeSeconds <= now
+                    ? 'session_max_age'
+                    : 'access_token_expired_without_refresh_token',
+                createdAt: session.createdAt,
+                expiresAt: session.tokens.expiresAt,
+                refreshExpiresAt: session.tokens.refreshExpiresAt,
+                hasRefreshToken: Boolean(session.tokens.refreshToken)
+            });
             await clearPersistedSession(cookies, persisted?.id);
             return null;
         }
         if (await isRevoked(session)) {
+            log.debug('OIDC session was revoked by back-channel logout — clearing session', {
+                hasSid: Boolean(session.sid),
+                hasSubject: Boolean(session.sub)
+            });
             await clearPersistedSession(cookies, persisted?.id);
             return null;
         }
@@ -411,6 +430,10 @@ export function createOIDC<
         }
 
         try {
+            log.debug('Refreshing OIDC session tokens', {
+                expiresAt: session.tokens.expiresAt,
+                refreshExpiresAt: session.tokens.refreshExpiresAt
+            });
             const tokenResponse = await refreshTokens(session.tokens.refreshToken as string);
             const claims = tokenResponse.id_token
                 ? await validateIdToken(tokenResponse.id_token, session.nonce as string)
@@ -443,6 +466,11 @@ export function createOIDC<
                 })
                 : (nextSession as TSession);
             await writePersistedSession(cookies, finalSession, persisted?.id);
+            log.debug('OIDC session tokens refreshed', {
+                expiresAt: finalSession.tokens.expiresAt,
+                refreshExpiresAt: finalSession.tokens.refreshExpiresAt,
+                hasRefreshToken: Boolean(finalSession.tokens.refreshToken)
+            });
             return finalSession;
         } catch (err) {
             log.error('Token refresh failed — clearing session', err);
@@ -594,6 +622,9 @@ export function createOIDC<
         if (session?.tokens.idToken) {
             url.searchParams.set('id_token_hint', session.tokens.idToken);
         }
+        // The provider needs client context to validate the post-logout URI
+        // even when the local session (and therefore id_token_hint) is gone.
+        url.searchParams.set('client_id', options.clientId);
         url.searchParams.set(
             'post_logout_redirect_uri',
             absoluteUrl(event, postLogoutRedirectPath)
@@ -703,9 +734,6 @@ export function createOIDC<
 
     function logoutHandler<T extends MinimalRequestEvent = RequestEvent>(defaults: OIDCLogoutOptions = {}): MinimalRequestHandler<T> {
         return async (event) => {
-            if (event.request.method !== 'POST') {
-                throw error(405, {message: 'Logout requires POST'});
-            }
             const form = await event.request.formData().catch(() => null);
             const postLogoutRedirectUri =
                 event.url.searchParams.get('postLogoutRedirectUri') ??
@@ -754,7 +782,9 @@ export function createOIDC<
         const metadata = await getMetadata();
         return {
             clientId: options.clientId,
+            issuer: metadata.issuer,
             loginPath,
+            logoutPath,
             redirectPath,
             metadata: {
                 issuer: metadata.issuer,
@@ -776,9 +806,16 @@ export function createOIDC<
         getMetadata,
         getSession,
         getPublicSession: async (event: {
-            cookies: RequestEvent['cookies']
-        }): Promise<OIDCPublicSession<TClaims> | null> =>
-            toPublicSession(await getSession(event)),
+            cookies: RequestEvent['cookies'];
+            depends?: (dependency: string) => void;
+        }): Promise<OIDCPublicSession<TClaims> | null> => {
+            event.depends?.(OIDC_SESSION_REVALIDATION_DEPENDENCY);
+            const session = toPublicSession(await getSession(event));
+
+            return session && event.depends
+                ? {...session, revalidationDependency: OIDC_SESSION_REVALIDATION_DEPENDENCY}
+                : session;
+        },
         getSessionManagementConfig,
         login: signIn,
         logout: signOut,
