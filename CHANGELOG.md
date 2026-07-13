@@ -1,3 +1,10 @@
+## [1.6.14](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.13...v1.6.14) (2026-07-13)
+
+
+### Bug Fixes
+
+* session invalidation to not flicker the package + enriched oidc context. ([e3f5e73](https://github.com/SourceRegistry/sveltekit-oidc/commit/e3f5e736d603d530210ba7c78081b152a082e683))
+
 ## [1.6.13](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.12...v1.6.13) (2026-07-13)
 
 
