@@ -1,4 +1,4 @@
-import type { Action, Cookies, Handle, RequestEvent, RequestHandler } from '@sveltejs/kit';
+import type {Action, Cookies, Handle, RequestEvent} from '@sveltejs/kit';
 import type { KeyObject } from 'node:crypto';
 
 export type MaybePromise<T> = Promise<T> | T;
@@ -228,7 +228,7 @@ export type OIDCOptions<
 	transformSession?: (
 		session: OIDCSession<TClaims>,
 		context: {
-			event?: RequestEvent;
+			event?: MinimalRequestEvent;
 			tokenResponse?: OIDCTokenResponse;
 			claims?: TClaims;
 			user?: TClaims;
@@ -288,6 +288,7 @@ export type OIDCStateCookie = {
 };
 
 export type MinimalRequestEvent = { cookies: Cookies, url: URL, request: Request, locals: App.Locals }
+export type MinimalRequestHandler<T extends MinimalRequestEvent> = (event: T) => MaybePromise<Response>;
 
 
 export type OIDCCallbackHandlerOptions<
@@ -341,19 +342,19 @@ export type OIDCInstance<
 	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
 > = {
 	handle: Handle;
-	hook: (event: {cookies: RequestEvent['cookies'], locals: App.Locals}) => Promise<{oidc:  OIDCHandleLocals<TClaims, TSession> }>
+	hook: (event: {cookies: Cookies, locals: App.Locals}) => Promise<{oidc:  OIDCHandleLocals<TClaims, TSession> }>
 	getMetadata: () => Promise<OIDCDiscoveryDocument>;
-	getSession: (event: {cookies: RequestEvent['cookies']}) => Promise<TSession | null>;
-	getPublicSession: (event: {cookies: RequestEvent['cookies']}) => Promise<OIDCPublicSession<TClaims> | null>;
+	getSession: (event: {cookies: Cookies}) => Promise<TSession | null>;
+	getPublicSession: (event: {cookies: Cookies}) => Promise<OIDCPublicSession<TClaims> | null>;
 	getSessionManagementConfig: () => Promise<OIDCSessionManagementConfig>;
-	login: (event: RequestEvent, loginOptions?: OIDCLoginOptions) => Promise<never>;
-	logout: (event: RequestEvent, logoutOptions?: OIDCLogoutOptions) => Promise<never>;
-	handleCallback: (event: RequestEvent) => Promise<OIDCCallbackResult<TClaims, TSession>>;
-	handleBackChannelLogout: (event: RequestEvent) => Promise<Response>;
-	loginHandler: (defaults?: OIDCLoginOptions) => RequestHandler;
-	callbackHandler: (handlerOptions?: OIDCCallbackHandlerOptions<TClaims, TSession>) => RequestHandler;
-	logoutHandler: (defaults?: OIDCLogoutOptions) => RequestHandler;
-	backChannelLogoutHandler: () => RequestHandler;
+	login: (event: MinimalRequestEvent, loginOptions?: OIDCLoginOptions) => Promise<never>;
+	logout: (event: MinimalRequestEvent, logoutOptions?: OIDCLogoutOptions) => Promise<never>;
+	handleCallback: (event: MinimalRequestEvent) => Promise<OIDCCallbackResult<TClaims, TSession>>;
+	handleBackChannelLogout: (event: MinimalRequestEvent) => Promise<Response>;
+	loginHandler: <T extends MinimalRequestEvent = RequestEvent>(defaults?: OIDCLoginOptions) => MinimalRequestHandler<T>;
+	callbackHandler: <T extends MinimalRequestEvent = RequestEvent>(handlerOptions?: OIDCCallbackHandlerOptions<TClaims, TSession>) => MinimalRequestHandler<T>;
+	logoutHandler: <T extends MinimalRequestEvent = RequestEvent>(defaults?: OIDCLogoutOptions) => MinimalRequestHandler<T>;
+	backChannelLogoutHandler: <T extends MinimalRequestEvent = RequestEvent>() => MinimalRequestHandler<T>;
 	createActions: (actionOptions?: OIDCActionOptions) => Readonly<{
 		login: Action;
 		logout: Action;

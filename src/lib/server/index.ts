@@ -14,7 +14,7 @@ import {createOIDCCookieStore} from './cookies.js';
 import {asAuthorizationHeader, createClientSecretJwtAssertion, createPrivateKeyJwtAssertion, fetchJson} from './jwt.js';
 import {isSessionExpired, normalizeTokens, shouldRefresh} from './session.js';
 import type {
-    MaybePromise, MinimalRequestEvent,
+    MinimalRequestEvent, MinimalRequestHandler,
     OIDCActionOptions,
     OIDCBackChannelLogoutClaims,
     OIDCCallbackHandlerOptions,
@@ -53,9 +53,6 @@ import {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from '
 
 export type * from './types.js';
 export {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
-
-
-type MinimalRequestHandler<T extends MinimalRequestEvent> = (event: T) => MaybePromise<Response>;
 
 function buildLogger(logger: OIDCLogger | false | undefined): Required<OIDCLogger> {
     const noop = () => {
