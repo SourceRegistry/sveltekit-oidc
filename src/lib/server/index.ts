@@ -5,7 +5,6 @@ import {
     type Handle,
     redirect,
     type RequestEvent,
-    type RequestHandler
 } from '@sveltejs/kit';
 import {randomBytes} from 'node:crypto';
 import {decode, fromWeb, verify} from '@sourceregistry/node-jwt/promises';
@@ -15,6 +14,7 @@ import {createOIDCCookieStore} from './cookies.js';
 import {asAuthorizationHeader, createClientSecretJwtAssertion, createPrivateKeyJwtAssertion, fetchJson} from './jwt.js';
 import {isSessionExpired, normalizeTokens, shouldRefresh} from './session.js';
 import type {
+    MaybePromise, MinimalRequestEvent,
     OIDCActionOptions,
     OIDCBackChannelLogoutClaims,
     OIDCCallbackHandlerOptions,
@@ -53,6 +53,9 @@ import {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from '
 
 export type * from './types.js';
 export {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
+
+
+type MinimalRequestHandler<T extends MinimalRequestEvent> = (event: T) => MaybePromise<Response>;
 
 function buildLogger(logger: OIDCLogger | false | undefined): Required<OIDCLogger> {
     const noop = () => {
@@ -455,7 +458,7 @@ export function createOIDC<
         return maybeRefreshSession(event.cookies, await readPersistedSession(event.cookies));
     }
 
-    async function signIn(event: RequestEvent, loginOptions: OIDCLoginOptions = {}): Promise<never> {
+    async function signIn(event: { cookies: Cookies, url: URL }, loginOptions: OIDCLoginOptions = {}): Promise<never> {
         const metadata = await getMetadata();
         const pkce = createPKCEPair();
         const state = base64UrlEncode(randomBytes(24));
@@ -497,7 +500,10 @@ export function createOIDC<
         throw redirect(302, authorizationUrl.toString());
     }
 
-    async function handleCallback(event: RequestEvent): Promise<OIDCCallbackResult<TClaims, TSession>> {
+    async function handleCallback(event: {
+        url: URL,
+        cookies: Cookies
+    }): Promise<OIDCCallbackResult<TClaims, TSession>> {
         const providerError = parseProviderError(event);
         if (providerError) {
             throw providerError;
@@ -552,7 +558,7 @@ export function createOIDC<
         };
         const finalSession = options.transformSession
             ? await options.transformSession(session, {
-                event,
+                event: event as RequestEvent,
                 tokenResponse,
                 claims,
                 user,
@@ -568,7 +574,10 @@ export function createOIDC<
         };
     }
 
-    async function signOut(event: RequestEvent, logoutOptions: OIDCLogoutOptions = {}): Promise<never> {
+    async function signOut(event: {
+        cookies: Cookies,
+        url: URL
+    }, logoutOptions: OIDCLogoutOptions = {}): Promise<never> {
         const metadata = await getMetadata();
         const persisted = await readPersistedSession(event.cookies);
         const session = persisted?.session ?? null;
@@ -599,7 +608,7 @@ export function createOIDC<
         throw redirect(302, url.toString());
     }
 
-    async function handleBackChannelLogout(event: RequestEvent) {
+    async function handleBackChannelLogout(event: { request: Request }) {
         const metadata = await getMetadata();
         if (!metadata.backchannel_logout_supported) {
             throw error(400, {message: 'Provider does not advertise back-channel logout support'});
@@ -649,7 +658,7 @@ export function createOIDC<
         return resolve(event);
     };
 
-    async function hook(event: { cookies: RequestEvent['cookies'], locals: App.Locals }) {
+    async function hook(event: { cookies: Cookies, locals: App.Locals }) {
         const session = await getSession(event);
         const locals = {
             oidc: {
@@ -670,14 +679,14 @@ export function createOIDC<
         return locals;
     }
 
-    function loginHandler(defaults: OIDCLoginOptions = {}): RequestHandler {
+    function loginHandler<T extends MinimalRequestEvent = RequestEvent>(defaults: OIDCLoginOptions = {}): MinimalRequestHandler<T> {
         return async (event) => {
             const returnTo = event.url.searchParams.get('returnTo') ?? defaults.returnTo;
             return signIn(event, {...defaults, returnTo});
         };
     }
 
-    function callbackHandler(handlerOptions: OIDCCallbackHandlerOptions<TClaims, TSession> = {}): RequestHandler {
+    function callbackHandler<T extends MinimalRequestEvent = RequestEvent>(handlerOptions: OIDCCallbackHandlerOptions<TClaims, TSession> = {}): MinimalRequestHandler<T> {
         return async (event) => {
             try {
                 const result = await handleCallback(event);
@@ -695,7 +704,7 @@ export function createOIDC<
         };
     }
 
-    function logoutHandler(defaults: OIDCLogoutOptions = {}): RequestHandler {
+    function logoutHandler<T extends MinimalRequestEvent = RequestEvent>(defaults: OIDCLogoutOptions = {}): MinimalRequestHandler<T> {
         return async (event) => {
             if (event.request.method !== 'POST') {
                 throw error(405, {message: 'Logout requires POST'});
@@ -716,7 +725,7 @@ export function createOIDC<
         };
     }
 
-    function backChannelLogoutHandler(): RequestHandler {
+    function backChannelLogoutHandler<T extends MinimalRequestEvent = RequestEvent>(): MinimalRequestHandler<T> {
         return async (event) => handleBackChannelLogout(event);
     }
 

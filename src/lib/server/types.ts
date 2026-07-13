@@ -287,15 +287,18 @@ export type OIDCStateCookie = {
 	createdAt: number;
 };
 
+export type MinimalRequestEvent = { cookies: Cookies, url: URL, request: Request, locals: App.Locals }
+
+
 export type OIDCCallbackHandlerOptions<
 	TClaims extends OIDCUserClaims = OIDCUserClaims,
 	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
 > = {
-	onsuccess?: (
-		event: RequestEvent,
+	onsuccess?: <T extends MinimalRequestEvent = RequestEvent>(
+		event: T,
 		result: OIDCCallbackResult<TClaims, TSession>
 	) => MaybePromise<Response | void>;
-	onfailure?: (event: RequestEvent, err: unknown) => MaybePromise<Response | void>;
+	onfailure?: <T extends MinimalRequestEvent = RequestEvent>(event: T, err: unknown) => MaybePromise<Response | void>;
 	redirectTo?: string;
 };
 
