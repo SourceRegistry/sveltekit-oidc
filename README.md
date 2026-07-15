@@ -31,6 +31,7 @@ type Identity = {
 	email?: string;
 	name?: string;
 	roles: string[];
+	permissions?: string[];
 };
 
 type RequestData = {
@@ -60,17 +61,26 @@ export const oidc = createOIDC<Identity, RequestData>({
 
 	loadRequestData: async ({session, event}) => ({
 		permissions: await loadPermissions(session.sub!, event)
+	}),
+
+	createPublicSession: ({base, data}) => ({
+		...base,
+		identity: {
+			...base.identity,
+			permissions: data?.permissions ?? []
+		}
 	})
 });
 ```
 
-The three extension points have deliberately literal names:
+The extension points have deliberately literal names:
 
-| Extension point        | When it runs                                                | Persisted               |
-| ---------------------- | ----------------------------------------------------------- | ----------------------- |
-| `resolveIdentity`      | After provider data is validated, on login and refresh      | Its result is persisted |
-| `beforeSessionPersist` | Immediately before a login or refreshed session is written  | Side effects only       |
-| `loadRequestData`      | Once while `handle` builds an authenticated request context | Never                   |
+| Extension point        | When it runs                                                    | Persisted               |
+| ---------------------- | --------------------------------------------------------------- | ----------------------- |
+| `resolveIdentity`      | After provider data is validated, on login and refresh          | Its result is persisted |
+| `beforeSessionPersist` | Immediately before a login or refreshed session is written      | Side effects only       |
+| `loadRequestData`      | Once while `handle` builds an authenticated request context     | Never                   |
+| `createPublicSession`  | When `getPublicSession` or `toPublicSession` projects a session | Never                   |
 
 Both login and refresh are explicit in the callback context:
 
@@ -163,15 +173,16 @@ import {oidc} from '$lib/server/auth';
 
 export async function load(event) {
 	return {
-		session: oidc.toPublicSession(event.locals.oidc?.session ?? null, event.depends),
+		session: oidc.toPublicSession(event.locals.oidc, event.depends),
 		sessionManagement: await oidc.getSessionManagementConfig()
 	};
 }
 ```
 
-`toPublicSession` projects an already-loaded session without reading the store, refreshing tokens,
-or loading request data again. `getPublicSession(event)` is available when the hook has not already
-loaded the session.
+`toPublicSession` projects the request context already loaded by `handle`. It does not read the
+store, refresh tokens, or load application data again. `createPublicSession` receives both the
+persisted session and `loadRequestData` result, but only exposes what the application explicitly
+returns. `getPublicSession(event)` is available when the hook has not already loaded the context.
 
 ## Client context
 

@@ -3,7 +3,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {createOIDC} from './index.js';
 import {serializeSignedCookie} from './utils.js';
-import type {OIDCSession} from './types.js';
+import type {OIDCHandleLocals, OIDCSession, OIDCUserClaims} from './types.js';
 
 const createCookies = (): Cookies =>
 	({
@@ -26,6 +26,15 @@ const createCookiesWithSession = (session: OIDCSession): Cookies => {
 		serialize: vi.fn()
 	} as unknown as Cookies;
 };
+
+const createRequestContext = <TData>(session: OIDCSession, data: TData): OIDCHandleLocals<OIDCUserClaims, TData> => ({
+	isAuthenticated: true,
+	session,
+	identity: session.identity,
+	data,
+	requireAuth: async () => session,
+	clearSession: async () => undefined
+});
 
 describe('OIDC logout', () => {
 	it('includes client_id when redirecting to the provider without a local session', async () => {
@@ -76,14 +85,21 @@ describe('OIDC public session revalidation', () => {
 			}
 		});
 		const depends = vi.fn();
+		const url = new URL('https://app.example/');
 
-		await oidc.getPublicSession({cookies: createCookies(), depends});
+		await oidc.getPublicSession({
+			cookies: createCookies(),
+			url,
+			request: new Request(url),
+			locals: {},
+			depends
+		});
 
 		expect(depends).toHaveBeenCalledOnce();
 		expect(depends).toHaveBeenCalledWith('oidc:session');
 	});
 
-	it('projects an already loaded session without reading or enriching it again', () => {
+	it('projects an already loaded request context without repeating server work', () => {
 		const loadRequestData = vi.fn();
 		const oidc = createOIDC({
 			issuer: 'https://identity.example/realms/test',
@@ -109,7 +125,7 @@ describe('OIDC public session revalidation', () => {
 			refreshedAt: Math.floor(Date.now() / 1000)
 		} satisfies OIDCSession;
 
-		const result = oidc.toPublicSession(session, depends);
+		const result = oidc.toPublicSession(createRequestContext(session, undefined), depends);
 
 		expect(loadRequestData).not.toHaveBeenCalled();
 		expect(depends).toHaveBeenCalledWith('oidc:session');
@@ -119,6 +135,40 @@ describe('OIDC public session revalidation', () => {
 			groups: ['admin'],
 			revalidationDependency: 'oidc:session'
 		});
+	});
+
+	it('creates an application public session from request-only data', () => {
+		const createPublicSession = vi.fn(({base, data}) => ({
+			...base,
+			identity: {...base.identity, permissions: data?.permissions ?? []}
+		}));
+		const oidc = createOIDC<OIDCUserClaims, {permissions: string[]}>({
+			issuer: 'https://identity.example/realms/test',
+			clientId: 'client-app',
+			cookieSecret,
+			endpoints: {
+				issuer: 'https://identity.example/realms/test',
+				authorization_endpoint: 'https://identity.example/authorize',
+				token_endpoint: 'https://identity.example/token'
+			},
+			createPublicSession
+		});
+		const session = {
+			issuer: 'https://identity.example/realms/test',
+			clientId: 'client-app',
+			sub: 'user-1',
+			groups: [],
+			idTokenClaims: {sub: 'user-1'},
+			identity: {sub: 'user-1'},
+			tokens: {accessToken: 'access', tokenType: 'Bearer', scope: ['openid']},
+			createdAt: Math.floor(Date.now() / 1000),
+			refreshedAt: Math.floor(Date.now() / 1000)
+		} satisfies OIDCSession;
+
+		const result = oidc.toPublicSession(createRequestContext(session, {permissions: ['read', 'write']}));
+
+		expect(createPublicSession).toHaveBeenCalledOnce();
+		expect(result?.identity).toEqual({sub: 'user-1', permissions: ['read', 'write']});
 	});
 });
 

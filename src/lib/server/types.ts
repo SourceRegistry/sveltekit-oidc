@@ -109,7 +109,7 @@ export type OIDCPublicSession<TIdentity extends OIDCUserClaims = OIDCUserClaims>
 	sessionState?: string;
 	sid?: string;
 	sub?: string;
-	/** SvelteKit dependency registered by getPublicSession for targeted client revalidation. */
+	/** SvelteKit dependency registered during public projection for targeted client revalidation. */
 	revalidationDependency?: string;
 };
 
@@ -239,6 +239,15 @@ export type OIDCOptions<TIdentity extends OIDCUserClaims = OIDCUserClaims, TRequ
 		session: OIDCSession<TIdentity>;
 		event: MinimalRequestEvent;
 	}) => MaybePromise<TRequestData>;
+	/**
+	 * Creates the browser-safe session from persisted authentication and
+	 * request-only application data. Runs only when a public session is requested.
+	 */
+	createPublicSession?: (context: {
+		session: OIDCSession<TIdentity>;
+		data: TRequestData | null;
+		base: OIDCPublicSession<TIdentity>;
+	}) => OIDCPublicSession<TIdentity>;
 	endpoints?: Partial<OIDCDiscoveryDocument>;
 	logger?: OIDCLogger | false;
 	/**
@@ -335,13 +344,14 @@ export type OIDCInstance<TIdentity extends OIDCUserClaims = OIDCUserClaims, TReq
 	createRequestContext: (event: MinimalRequestEvent) => Promise<OIDCHandleLocals<TIdentity, TRequestData>>;
 	getMetadata: () => Promise<OIDCDiscoveryDocument>;
 	getSession: (event: {cookies: Cookies}) => Promise<OIDCSession<TIdentity> | null>;
-	getPublicSession: (event: {
-		cookies: Cookies;
-		depends?: (dependency: string) => void;
-	}) => Promise<OIDCPublicSession<TIdentity> | null>;
-	/** Projects an already-loaded session without reading or refreshing it again. */
+	getPublicSession: (
+		event: MinimalRequestEvent & {
+			depends?: (dependency: string) => void;
+		}
+	) => Promise<OIDCPublicSession<TIdentity> | null>;
+	/** Projects an already-loaded request context without repeating any server work. */
 	toPublicSession: (
-		session: OIDCSession<TIdentity> | null,
+		context: OIDCHandleLocals<TIdentity, TRequestData> | null | undefined,
 		depends?: (dependency: string) => void
 	) => OIDCPublicSession<TIdentity> | null;
 	getSessionManagementConfig: () => Promise<OIDCSessionManagementConfig>;

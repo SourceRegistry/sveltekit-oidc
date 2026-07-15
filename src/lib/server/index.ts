@@ -852,14 +852,24 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         };
     }
 
-    function createPublicSession(
-        session: OIDCSession<TIdentity> | null,
+    function projectPublicSession(
+        context: OIDCHandleLocals<TIdentity, TRequestData> | null | undefined,
         depends?: (dependency: string) => void
     ): OIDCPublicSession<TIdentity> | null {
         depends?.(OIDC_SESSION_REVALIDATION_DEPENDENCY);
-        const publicSession = toPublicSession(session);
+        if (!context?.session) return null;
 
-        return publicSession && depends
+        const base = toPublicSession(context.session);
+        if (!base) return null;
+        const publicSession = options.createPublicSession
+            ? options.createPublicSession({
+                  session: context.session,
+                  data: context.data,
+                  base
+              })
+            : base;
+
+        return depends
             ? {
                   ...publicSession,
                   revalidationDependency: OIDC_SESSION_REVALIDATION_DEPENDENCY
@@ -872,11 +882,13 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         createRequestContext,
         getMetadata,
         getSession,
-        getPublicSession: async (event: {
-            cookies: RequestEvent['cookies'];
-            depends?: (dependency: string) => void;
-        }): Promise<OIDCPublicSession<TIdentity> | null> => createPublicSession(await getSession(event), event.depends),
-        toPublicSession: createPublicSession,
+        getPublicSession: async (
+            event: MinimalRequestEvent & {
+                depends?: (dependency: string) => void;
+            }
+        ): Promise<OIDCPublicSession<TIdentity> | null> =>
+            projectPublicSession(await createRequestContext(event), event.depends),
+        toPublicSession: projectPublicSession,
         getSessionManagementConfig,
         login: signIn,
         logout: signOut,
