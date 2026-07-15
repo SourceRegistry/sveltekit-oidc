@@ -19,7 +19,7 @@
 		</p>
 	{:else}
 		{#if data.session?.isAuthenticated}
-			<p>Signed in as {data.session.user?.email ?? data.session.user?.name ?? data.session.sub}</p>
+			<p>Signed in as {data.session.identity.email ?? data.session.identity.name ?? data.session.sub}</p>
 			<p>Groups: {data.session.groups.length ? data.session.groups.join(', ') : 'none'}</p>
 			<p><a href="/protected">Open protected example</a></p>
 			<form method="POST" action="/auth/logout">

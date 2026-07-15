@@ -1,14 +1,8 @@
-import type {
-	OIDCBackChannelLogoutStore,
-	OIDCSession,
-	OIDCSessionStore,
-	OIDCUserClaims
-} from './types.js';
+import type {OIDCBackChannelLogoutStore, OIDCSession, OIDCSessionStore, OIDCUserClaims} from './types.js';
 
 export function createInMemoryBackChannelLogoutStore<
-	TClaims extends OIDCUserClaims = OIDCUserClaims,
-	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
->(): OIDCBackChannelLogoutStore<TClaims, TSession> {
+	TIdentity extends OIDCUserClaims = OIDCUserClaims
+>(): OIDCBackChannelLogoutStore<TIdentity> {
 	const revokedBySid = new Set<string>();
 	const revokedBySub = new Set<string>();
 
@@ -24,17 +18,16 @@ export function createInMemoryBackChannelLogoutStore<
 		async isRevoked(session) {
 			return Boolean(
 				(session.sid && revokedBySid.has(`${session.issuer}:${session.clientId}:${session.sid}`)) ||
-					(session.sub && revokedBySub.has(`${session.issuer}:${session.clientId}:${session.sub}`))
+				(session.sub && revokedBySub.has(`${session.issuer}:${session.clientId}:${session.sub}`))
 			);
 		}
 	};
 }
 
 export function createInMemorySessionStore<
-	TClaims extends OIDCUserClaims = OIDCUserClaims,
-	TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
->(): OIDCSessionStore<TClaims, TSession> {
-	type Sessions = Map<string, Parameters<OIDCSessionStore<TClaims, TSession>['set']>[1]>;
+	TIdentity extends OIDCUserClaims = OIDCUserClaims
+>(): OIDCSessionStore<TIdentity> {
+	type Sessions = Map<string, Parameters<OIDCSessionStore<TIdentity>['set']>[1]>;
 	// Persist the Map on globalThis so Vite HMR module re-evaluations don't
 	// create a fresh store and orphan all live session cookies.
 	const g = globalThis as Record<string, unknown>;

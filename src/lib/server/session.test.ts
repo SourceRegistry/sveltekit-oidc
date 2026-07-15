@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { isSessionExpired, normalizeTokens, shouldRefresh } from './session.js';
-import type { OIDCSession } from './types.js';
+import {isSessionExpired, normalizeTokens, shouldRefresh} from './session.js';
+import type {OIDCSession} from './types.js';
 
 describe('normalizeTokens', () => {
 	it('merges token responses with existing tokens', () => {
@@ -42,6 +42,8 @@ describe('shouldRefresh', () => {
 			issuer: 'https://issuer.example',
 			clientId: 'client',
 			groups: [],
+			idTokenClaims: {sub: 'user-1'},
+			identity: {sub: 'user-1'},
 			tokens: {
 				accessToken: 'access',
 				tokenType: 'Bearer',
@@ -59,6 +61,8 @@ describe('shouldRefresh', () => {
 			issuer: 'https://issuer.example',
 			clientId: 'client',
 			groups: [],
+			idTokenClaims: {sub: 'user-1'},
+			identity: {sub: 'user-1'},
 			tokens: {
 				accessToken: 'access',
 				tokenType: 'Bearer',
@@ -80,6 +84,8 @@ describe('isSessionExpired', () => {
 		issuer: 'https://issuer.example',
 		clientId: 'client',
 		groups: [],
+		idTokenClaims: {sub: 'user-1'},
+		identity: {sub: 'user-1'},
 		tokens: {accessToken: 'access', tokenType: 'Bearer', scope: ['openid']},
 		createdAt: 100,
 		refreshedAt: 100

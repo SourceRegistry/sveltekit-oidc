@@ -1,11 +1,4 @@
-import {
-    type Action,
-    type Cookies,
-    error,
-    type Handle,
-    redirect,
-    type RequestEvent,
-} from '@sveltejs/kit';
+import {type Action, type Cookies, error, type Handle, redirect, type RequestEvent} from '@sveltejs/kit';
 import {randomBytes} from 'node:crypto';
 import {decode, fromWeb, verify} from '@sourceregistry/node-jwt/promises';
 import type {JWKSResolver, JWT as JSONWebToken} from '@sourceregistry/node-jwt';
@@ -14,7 +7,8 @@ import {createOIDCCookieStore} from './cookies.js';
 import {asAuthorizationHeader, createClientSecretJwtAssertion, createPrivateKeyJwtAssertion, fetchJson} from './jwt.js';
 import {isSessionExpired, normalizeTokens, shouldRefresh} from './session.js';
 import type {
-    MinimalRequestEvent, MinimalRequestHandler,
+    MinimalRequestEvent,
+    MinimalRequestHandler,
     OIDCActionOptions,
     OIDCBackChannelLogoutClaims,
     OIDCCallbackHandlerOptions,
@@ -57,35 +51,34 @@ export {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from '
 const OIDC_SESSION_REVALIDATION_DEPENDENCY = 'oidc:session';
 
 function buildLogger(logger: OIDCLogger | false | undefined): Required<OIDCLogger> {
-    const noop = () => {
-    };
+    const noop = () => {};
     if (logger === false) return {debug: noop, info: noop, warn: noop, error: noop};
-    if (logger) return {
-        debug: (...a) => logger.debug?.(...a),
-        info: (...a) => logger.info?.(...a),
-        warn: (...a) => logger.warn?.(...a),
-        error: (...a) => logger.error?.(...a),
-    };
+    if (logger)
+        return {
+            debug: (...a) => logger.debug?.(...a),
+            info: (...a) => logger.info?.(...a),
+            warn: (...a) => logger.warn?.(...a),
+            error: (...a) => logger.error?.(...a)
+        };
     const p = '[sveltekit-oidc]';
     return {
         debug: (...a) => console.debug(p, ...a),
         info: (...a) => console.info(p, ...a),
         warn: (...a) => console.warn(p, ...a),
-        error: (...a) => console.error(p, ...a),
+        error: (...a) => console.error(p, ...a)
     };
 }
 
-export function createOIDC<
-    TClaims extends OIDCUserClaims = OIDCUserClaims,
-    TSession extends OIDCSession<TClaims> = OIDCSession<TClaims>
->(options: OIDCOptions<TClaims, TSession>): OIDCInstance<TClaims, TSession> {
+export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TRequestData = undefined>(
+    options: OIDCOptions<TIdentity, TRequestData>
+): OIDCInstance<TIdentity, TRequestData> {
     const log = buildLogger(options.logger);
-    const sessionStore = options.sessionStore === 'memory'
-        ? createInMemorySessionStore<TClaims, TSession>()
-        : options.sessionStore;
-    const backChannelLogoutStore = options.backChannelLogoutStore === 'memory'
-        ? createInMemoryBackChannelLogoutStore<TClaims, TSession>()
-        : options.backChannelLogoutStore;
+    const sessionStore =
+        options.sessionStore === 'memory' ? createInMemorySessionStore<TIdentity>() : options.sessionStore;
+    const backChannelLogoutStore =
+        options.backChannelLogoutStore === 'memory'
+            ? createInMemoryBackChannelLogoutStore<TIdentity>()
+            : options.backChannelLogoutStore;
 
     const cookieOptions = buildCookieOptions(options.cookieOptions);
     const clockSkewSeconds = options.clockSkewSeconds ?? 30;
@@ -104,7 +97,7 @@ export function createOIDC<
         options.clientAuthMethod ?? (options.clientSecret ? 'client_secret_basic' : 'none');
     const fetchImpl: typeof fetch = options.fetch ?? fetch;
 
-    const cookieStore = createOIDCCookieStore<TClaims, TSession>(
+    const cookieStore = createOIDCCookieStore<TIdentity>(
         options.cookieSecret,
         sessionCookieName,
         stateCookieName,
@@ -114,12 +107,22 @@ export function createOIDC<
     let metadataPromise: Promise<OIDCDiscoveryDocument> | undefined;
     let jwksPromise: Promise<JWKSResolver> | undefined;
 
+    function hasCurrentSessionShape(session: OIDCSession<TIdentity> | null): session is OIDCSession<TIdentity> {
+        return Boolean(session?.identity?.sub && session.idTokenClaims?.sub);
+    }
+
     async function readPersistedSession(
         cookies: RequestEvent['cookies']
-    ): Promise<OIDCPersistedSession<TClaims, TSession> | null> {
+    ): Promise<OIDCPersistedSession<TIdentity> | null> {
         if (!sessionStore) {
             const session = cookieStore.readSession(cookies);
-            return session ? {session} : null;
+            if (!session) return null;
+            if (!hasCurrentSessionShape(session)) {
+                log.debug('Discarding an incompatible OIDC session');
+                cookieStore.clearSession(cookies);
+                return null;
+            }
+            return {session};
         }
 
         const reference = cookieStore.readSessionReference(cookies);
@@ -134,6 +137,12 @@ export function createOIDC<
             cookieStore.clearSessionReference(cookies);
             return null;
         }
+        if (!hasCurrentSessionShape(session)) {
+            log.debug('Discarding an incompatible persisted OIDC session');
+            await sessionStore.delete(reference.id);
+            cookieStore.clearSessionReference(cookies);
+            return null;
+        }
 
         return {
             id: reference.id,
@@ -143,7 +152,7 @@ export function createOIDC<
 
     async function writePersistedSession(
         cookies: RequestEvent['cookies'],
-        session: TSession,
+        session: OIDCSession<TIdentity>,
         sessionId?: string
     ): Promise<void> {
         if (!sessionStore) {
@@ -156,10 +165,7 @@ export function createOIDC<
         cookieStore.writeSessionReference(cookies, {id});
     }
 
-    async function clearPersistedSession(
-        cookies: RequestEvent['cookies'],
-        sessionId?: string
-    ): Promise<void> {
+    async function clearPersistedSession(cookies: RequestEvent['cookies'], sessionId?: string): Promise<void> {
         if (!sessionStore) {
             cookieStore.clearSession(cookies);
             return;
@@ -188,7 +194,9 @@ export function createOIDC<
                     options.discoveryUrl ?? (issuer ? `${issuer}/.well-known/openid-configuration` : undefined);
 
                 if (!discoveryUrl) {
-                    throw error(500, {message: 'OIDC issuer or discoveryUrl must be configured'});
+                    throw error(500, {
+                        message: 'OIDC issuer or discoveryUrl must be configured'
+                    });
                 }
 
                 const document = await fetchJson<OIDCDiscoveryDocument>(discoveryUrl, undefined, fetchImpl);
@@ -207,10 +215,15 @@ export function createOIDC<
         if (!jwksPromise) {
             jwksPromise = getMetadata().then((metadata) => {
                 if (!metadata.jwks_uri) {
-                    throw error(500, {message: 'OIDC jwks_uri is required to validate id_token values'});
+                    throw error(500, {
+                        message: 'OIDC jwks_uri is required to validate id_token values'
+                    });
                 }
 
-                return fromWeb(metadata.jwks_uri, {overrideEndpointCheck: true, fetch: fetchImpl});
+                return fromWeb(metadata.jwks_uri, {
+                    overrideEndpointCheck: true,
+                    fetch: fetchImpl
+                });
             });
         }
 
@@ -236,7 +249,9 @@ export function createOIDC<
         const jwks = await getJwks();
         const key = decoded.header.kid ? await jwks.key(decoded.header.kid) : (await jwks.list())[0];
         if (!key) {
-            throw error(401, {message: 'Unable to resolve a signing key from JWKS'});
+            throw error(401, {
+                message: 'Unable to resolve a signing key from JWKS'
+            });
         }
 
         try {
@@ -245,9 +260,7 @@ export function createOIDC<
         } catch (err) {
             throw error(401, {
                 message:
-                    typeof err === 'object' && err && 'reason' in err
-                        ? String(err.reason)
-                        : 'JWT verification failed'
+                    typeof err === 'object' && err && 'reason' in err ? String(err.reason) : 'JWT verification failed'
             });
         }
     }
@@ -264,13 +277,17 @@ export function createOIDC<
                 return {headers, body};
             case 'client_secret_basic':
                 if (!options.clientSecret) {
-                    throw error(500, {message: 'clientSecret is required for client_secret_basic'});
+                    throw error(500, {
+                        message: 'clientSecret is required for client_secret_basic'
+                    });
                 }
                 headers.authorization = asAuthorizationHeader(options.clientId, options.clientSecret);
                 return {headers, body};
             case 'client_secret_post':
                 if (!options.clientSecret) {
-                    throw error(500, {message: 'clientSecret is required for client_secret_post'});
+                    throw error(500, {
+                        message: 'clientSecret is required for client_secret_post'
+                    });
                 }
                 body.set('client_id', options.clientId);
                 body.set('client_secret', options.clientSecret);
@@ -290,7 +307,9 @@ export function createOIDC<
                 return {headers, body};
             case 'private_key_jwt':
                 if (!options.privateKeyJwt?.privateKey) {
-                    throw error(500, {message: 'privateKeyJwt.privateKey is required for private_key_jwt'});
+                    throw error(500, {
+                        message: 'privateKeyJwt.privateKey is required for private_key_jwt'
+                    });
                 }
                 body.set('client_id', options.clientId);
                 body.set(
@@ -304,15 +323,13 @@ export function createOIDC<
                 body.set('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
                 return {headers, body};
             default:
-                throw error(500, {message: `Unsupported client authentication method '${clientAuthMethod}'`});
+                throw error(500, {
+                    message: `Unsupported client authentication method '${clientAuthMethod}'`
+                });
         }
     }
 
-    async function exchangeCode(params: {
-        code: string;
-        redirectUri: string;
-        codeVerifier: string;
-    }) {
+    async function exchangeCode(params: {code: string; redirectUri: string; codeVerifier: string}) {
         const metadata = await getMetadata();
         const auth = await buildTokenRequestAuth(metadata.token_endpoint);
         auth.body.set('grant_type', 'authorization_code');
@@ -320,11 +337,15 @@ export function createOIDC<
         auth.body.set('redirect_uri', params.redirectUri);
         auth.body.set('code_verifier', params.codeVerifier);
 
-        return fetchJson<OIDCTokenResponse>(metadata.token_endpoint, {
-            method: 'POST',
-            headers: auth.headers,
-            body: auth.body
-        }, fetchImpl);
+        return fetchJson<OIDCTokenResponse>(
+            metadata.token_endpoint,
+            {
+                method: 'POST',
+                headers: auth.headers,
+                body: auth.body
+            },
+            fetchImpl
+        );
     }
 
     async function refreshTokens(refreshToken: string) {
@@ -333,11 +354,15 @@ export function createOIDC<
         auth.body.set('grant_type', 'refresh_token');
         auth.body.set('refresh_token', refreshToken);
 
-        return fetchJson<OIDCTokenResponse>(metadata.token_endpoint, {
-            method: 'POST',
-            headers: auth.headers,
-            body: auth.body
-        }, fetchImpl);
+        return fetchJson<OIDCTokenResponse>(
+            metadata.token_endpoint,
+            {
+                method: 'POST',
+                headers: auth.headers,
+                body: auth.body
+            },
+            fetchImpl
+        );
     }
 
     async function validateIdToken(idToken: string, nonce: string) {
@@ -349,9 +374,23 @@ export function createOIDC<
             clockSkew: clockSkewSeconds
         });
         validateIdTokenClaims(claims, nonce);
-        return options.transformClaims
-            ? await options.transformClaims(claims)
-            : (claims as TClaims);
+        return claims;
+    }
+
+    async function resolveIdentity(
+        idTokenClaims: OIDCUserClaims,
+        userInfo: OIDCUserClaims | undefined,
+        reason: 'login' | 'refresh'
+    ): Promise<TIdentity> {
+        if (options.resolveIdentity) {
+            return options.resolveIdentity({idTokenClaims, userInfo, reason});
+        }
+
+        return {
+            ...idTokenClaims,
+            ...userInfo,
+            groups: userInfo?.groups ?? idTokenClaims.groups
+        } as TIdentity;
     }
 
     async function validateBackChannelLogoutToken(logoutToken: string) {
@@ -380,14 +419,18 @@ export function createOIDC<
             return undefined;
         }
 
-        return fetchJson<OIDCUserClaims>(metadata.userinfo_endpoint, {
-            headers: {
-                authorization: `Bearer ${accessToken}`
-            }
-        }, fetchImpl);
+        return fetchJson<OIDCUserClaims>(
+            metadata.userinfo_endpoint,
+            {
+                headers: {
+                    authorization: `Bearer ${accessToken}`
+                }
+            },
+            fetchImpl
+        );
     }
 
-    async function isRevoked(session: TSession | null) {
+    async function isRevoked(session: OIDCSession<TIdentity> | null) {
         if (!session || !backChannelLogoutStore) {
             return false;
         }
@@ -397,7 +440,8 @@ export function createOIDC<
 
     async function maybeRefreshSession(
         cookies: RequestEvent['cookies'],
-        persisted: OIDCPersistedSession<TClaims, TSession> | null
+        persisted: OIDCPersistedSession<TIdentity> | null,
+        event?: MinimalRequestEvent
     ) {
         const session = persisted?.session ?? null;
         if (!session) {
@@ -406,9 +450,10 @@ export function createOIDC<
         if (isSessionExpired(session, sessionMaxAgeSeconds)) {
             const now = Math.floor(Date.now() / 1000);
             log.debug('OIDC session expired — clearing session', {
-                reason: session.createdAt + sessionMaxAgeSeconds <= now
-                    ? 'session_max_age'
-                    : 'access_token_expired_without_refresh_token',
+                reason:
+                    session.createdAt + sessionMaxAgeSeconds <= now
+                        ? 'session_max_age'
+                        : 'access_token_expired_without_refresh_token',
                 createdAt: session.createdAt,
                 expiresAt: session.tokens.expiresAt,
                 refreshExpiresAt: session.tokens.refreshExpiresAt,
@@ -435,43 +480,38 @@ export function createOIDC<
                 refreshExpiresAt: session.tokens.refreshExpiresAt
             });
             const tokenResponse = await refreshTokens(session.tokens.refreshToken as string);
-            const claims = tokenResponse.id_token
+            const idTokenClaims = tokenResponse.id_token
                 ? await validateIdToken(tokenResponse.id_token, session.nonce as string)
-                : session.claims;
-            const rawUser =
-                options.fetchUserInfo !== false ? await fetchUserInfo(tokenResponse.access_token) : session.user;
-            if (claims) {
-                validateUserInfoSubject(claims, rawUser);
-            }
-            const user = options.transformUser
-                ? await options.transformUser(rawUser, {claims})
-                : (rawUser as TClaims | undefined);
-            const nextSession: OIDCSession<TClaims> = {
+                : session.idTokenClaims;
+            const userInfo =
+                options.fetchUserInfo !== false ? await fetchUserInfo(tokenResponse.access_token) : session.userInfo;
+            validateUserInfoSubject(idTokenClaims, userInfo);
+            const identity = await resolveIdentity(idTokenClaims, userInfo, 'refresh');
+            const nextSession: OIDCSession<TIdentity> = {
                 ...session,
-                sub: claims?.sub ?? session.sub,
-                sid: claims?.sid ?? session.sid,
-                groups: collectGroups(claims, user, session.user, session.claims),
-                claims,
-                user,
+                sub: idTokenClaims.sub,
+                sid: idTokenClaims.sid ?? session.sid,
+                groups: collectGroups(idTokenClaims, userInfo, identity),
+                idTokenClaims,
+                userInfo,
+                identity,
                 sessionState: tokenResponse.session_state ?? session.sessionState,
                 tokens: normalizeTokens(tokenResponse, defaultScope, session.tokens),
                 refreshedAt: Math.floor(Date.now() / 1000)
             };
-            const finalSession = options.transformSession
-                ? await options.transformSession(nextSession, {
-                    tokenResponse,
-                    claims,
-                    user,
-                    isRefresh: true
-                })
-                : (nextSession as TSession);
-            await writePersistedSession(cookies, finalSession, persisted?.id);
-            log.debug('OIDC session tokens refreshed', {
-                expiresAt: finalSession.tokens.expiresAt,
-                refreshExpiresAt: finalSession.tokens.refreshExpiresAt,
-                hasRefreshToken: Boolean(finalSession.tokens.refreshToken)
+            await options.beforeSessionPersist?.({
+                session: nextSession,
+                reason: 'refresh',
+                event,
+                tokenResponse
             });
-            return finalSession;
+            await writePersistedSession(cookies, nextSession, persisted?.id);
+            log.debug('OIDC session tokens refreshed', {
+                expiresAt: nextSession.tokens.expiresAt,
+                refreshExpiresAt: nextSession.tokens.refreshExpiresAt,
+                hasRefreshToken: Boolean(nextSession.tokens.refreshToken)
+            });
+            return nextSession;
         } catch (err) {
             log.error('Token refresh failed — clearing session', err);
             await clearPersistedSession(cookies, persisted?.id);
@@ -479,15 +519,15 @@ export function createOIDC<
         }
     }
 
-    async function getSession(event: { cookies: Cookies }) {
-        const session = await maybeRefreshSession(event.cookies, await readPersistedSession(event.cookies));
-        if (!session || !options.enrichSession) {
-            return session;
-        }
-        return options.enrichSession(session, {event: event as MinimalRequestEvent});
+    async function getSession(event: {cookies: Cookies}) {
+        return maybeRefreshSession(
+            event.cookies,
+            await readPersistedSession(event.cookies),
+            'url' in event && 'request' in event ? (event as MinimalRequestEvent) : undefined
+        );
     }
 
-    async function signIn(event: { cookies: Cookies, url: URL }, loginOptions: OIDCLoginOptions = {}): Promise<never> {
+    async function signIn(event: {cookies: Cookies; url: URL}, loginOptions: OIDCLoginOptions = {}): Promise<never> {
         const metadata = await getMetadata();
         const pkce = createPKCEPair();
         const state = base64UrlEncode(randomBytes(24));
@@ -507,10 +547,7 @@ export function createOIDC<
         authorizationUrl.searchParams.set('client_id', options.clientId);
         authorizationUrl.searchParams.set('response_type', 'code');
         authorizationUrl.searchParams.set('redirect_uri', redirectUri);
-        authorizationUrl.searchParams.set(
-            'scope',
-            normalizeScope(loginOptions.scope ?? defaultScope).join(' ')
-        );
+        authorizationUrl.searchParams.set('scope', normalizeScope(loginOptions.scope ?? defaultScope).join(' '));
         authorizationUrl.searchParams.set('state', state);
         authorizationUrl.searchParams.set('nonce', nonce);
         authorizationUrl.searchParams.set('code_challenge', pkce.challenge);
@@ -529,10 +566,7 @@ export function createOIDC<
         throw redirect(302, authorizationUrl.toString());
     }
 
-    async function handleCallback(event: {
-        url: URL,
-        cookies: Cookies
-    }): Promise<OIDCCallbackResult<TClaims, TSession>> {
+    async function handleCallback(event: {url: URL; cookies: Cookies}): Promise<OIDCCallbackResult<TIdentity>> {
         const providerError = parseProviderError(event);
         if (providerError) {
             throw providerError;
@@ -557,56 +591,56 @@ export function createOIDC<
         });
 
         if (!tokenResponse.id_token) {
-            throw error(401, {message: 'OIDC callback response must include an id_token'});
+            throw error(401, {
+                message: 'OIDC callback response must include an id_token'
+            });
         }
 
-        const claims = await validateIdToken(tokenResponse.id_token, stateCookie.nonce);
-        const rawUser =
+        const idTokenClaims = await validateIdToken(tokenResponse.id_token, stateCookie.nonce);
+        const userInfo =
             options.fetchUserInfo === false
                 ? undefined
                 : await fetchUserInfo(tokenResponse.access_token).catch(() => undefined);
-        validateUserInfoSubject(claims, rawUser);
-        const user = options.transformUser
-            ? await options.transformUser(rawUser, {claims})
-            : (rawUser as TClaims | undefined);
+        validateUserInfoSubject(idTokenClaims, userInfo);
+        const identity = await resolveIdentity(idTokenClaims, userInfo, 'login');
         const metadata = await getMetadata();
         const now = Math.floor(Date.now() / 1000);
-        const session: OIDCSession<TClaims> = {
+        const session: OIDCSession<TIdentity> = {
             issuer: metadata.issuer,
             clientId: options.clientId,
             nonce: stateCookie.nonce,
-            sub: claims?.sub,
-            sid: claims?.sid,
+            sub: idTokenClaims.sub,
+            sid: idTokenClaims.sid,
             sessionState: tokenResponse.session_state ?? event.url.searchParams.get('session_state') ?? undefined,
-            groups: collectGroups(claims, user),
-            user,
-            claims,
+            groups: collectGroups(idTokenClaims, userInfo, identity),
+            idTokenClaims,
+            userInfo,
+            identity,
             tokens: normalizeTokens(tokenResponse, defaultScope),
             createdAt: now,
             refreshedAt: now
         };
-        const finalSession = options.transformSession
-            ? await options.transformSession(session, {
-                event: event as RequestEvent,
-                tokenResponse,
-                claims,
-                user,
-                isRefresh: false
-            })
-            : (session as TSession);
-
-        await writePersistedSession(event.cookies, finalSession);
+        await options.beforeSessionPersist?.({
+            session,
+            reason: 'login',
+            event: event as MinimalRequestEvent,
+            tokenResponse
+        });
+        await writePersistedSession(event.cookies, session);
 
         return {
-            session: finalSession,
+            session,
             returnTo: stateCookie.returnTo
         };
     }
 
-    async function signOut(event: {
-        cookies: Cookies,
-        url: URL
-    }, logoutOptions: OIDCLogoutOptions = {}): Promise<never> {
+    async function signOut(
+        event: {
+            cookies: Cookies;
+            url: URL;
+        },
+        logoutOptions: OIDCLogoutOptions = {}
+    ): Promise<never> {
         const metadata = await getMetadata();
         const persisted = await readPersistedSession(event.cookies);
         const session = persisted?.session ?? null;
@@ -629,10 +663,7 @@ export function createOIDC<
         // The provider needs client context to validate the post-logout URI
         // even when the local session (and therefore id_token_hint) is gone.
         url.searchParams.set('client_id', options.clientId);
-        url.searchParams.set(
-            'post_logout_redirect_uri',
-            absoluteUrl(event, postLogoutRedirectPath)
-        );
+        url.searchParams.set('post_logout_redirect_uri', absoluteUrl(event, postLogoutRedirectPath));
         if (logoutOptions.state) {
             url.searchParams.set('state', logoutOptions.state);
         }
@@ -640,10 +671,12 @@ export function createOIDC<
         throw redirect(302, url.toString());
     }
 
-    async function handleBackChannelLogout(event: { request: Request }) {
+    async function handleBackChannelLogout(event: {request: Request}) {
         const metadata = await getMetadata();
         if (!metadata.backchannel_logout_supported) {
-            throw error(400, {message: 'Provider does not advertise back-channel logout support'});
+            throw error(400, {
+                message: 'Provider does not advertise back-channel logout support'
+            });
         }
         if (!backChannelLogoutStore) {
             throw error(500, {
@@ -670,7 +703,7 @@ export function createOIDC<
         return new Response(null, {status: 200});
     }
 
-    async function requireAuth(event: { url: URL, cookies: RequestEvent['cookies'] }, returnTo?: string) {
+    async function requireAuth(event: {url: URL; cookies: RequestEvent['cookies']}, returnTo?: string) {
         const session = await getSession(event);
         if (session) {
             return session;
@@ -685,40 +718,48 @@ export function createOIDC<
     }
 
     const handle: Handle = async ({event, resolve}) => {
-        const {oidc} = await hook(event);
-        (event.locals as typeof event.locals & { oidc: OIDCHandleLocals<TClaims, TSession> }).oidc = oidc;
+        const oidc = await createRequestContext(event);
+        (
+            event.locals as typeof event.locals & {
+                oidc: OIDCHandleLocals<TIdentity, TRequestData>;
+            }
+        ).oidc = oidc;
         return resolve(event);
     };
 
-    async function hook(event: { cookies: Cookies, locals: App.Locals }) {
+    async function createRequestContext(
+        event: MinimalRequestEvent
+    ): Promise<OIDCHandleLocals<TIdentity, TRequestData>> {
         const session = await getSession(event);
-        const locals = {
-            oidc: {
-                isAuthenticated: Boolean(session),
-                session,
-                user: session?.user,
-                claims: session?.claims,
-                requireAuth: async () => {
-                    if (!session) {
-                        throw error(401, {message: 'Authentication required'});
-                    }
-                    return session;
-                },
-                clearSession: async () => clearPersistedSession(event.cookies)
-            } satisfies OIDCHandleLocals<TClaims, TSession>
-        };
-        (event.locals as typeof event.locals & { oidc: OIDCHandleLocals<TClaims, TSession> }).oidc = locals.oidc;
-        return locals;
+        const data = session && options.loadRequestData ? await options.loadRequestData({session, event}) : null;
+        const context = {
+            isAuthenticated: Boolean(session),
+            session,
+            identity: session?.identity,
+            data,
+            requireAuth: async () => {
+                if (!session) {
+                    throw error(401, {message: 'Authentication required'});
+                }
+                return session;
+            },
+            clearSession: async () => clearPersistedSession(event.cookies)
+        } satisfies OIDCHandleLocals<TIdentity, TRequestData>;
+        return context;
     }
 
-    function loginHandler<T extends MinimalRequestEvent = RequestEvent>(defaults: OIDCLoginOptions = {}): MinimalRequestHandler<T> {
+    function loginHandler<T extends MinimalRequestEvent = RequestEvent>(
+        defaults: OIDCLoginOptions = {}
+    ): MinimalRequestHandler<T> {
         return async (event) => {
             const returnTo = event.url.searchParams.get('returnTo') ?? defaults.returnTo;
             return signIn(event, {...defaults, returnTo});
         };
     }
 
-    function callbackHandler<T extends MinimalRequestEvent = RequestEvent>(handlerOptions: OIDCCallbackHandlerOptions<TClaims, TSession> = {}): MinimalRequestHandler<T> {
+    function callbackHandler<T extends MinimalRequestEvent = RequestEvent>(
+        handlerOptions: OIDCCallbackHandlerOptions<TIdentity> = {}
+    ): MinimalRequestHandler<T> {
         return async (event) => {
             try {
                 const result = await handleCallback(event);
@@ -736,7 +777,9 @@ export function createOIDC<
         };
     }
 
-    function logoutHandler<T extends MinimalRequestEvent = RequestEvent>(defaults: OIDCLogoutOptions = {}): MinimalRequestHandler<T> {
+    function logoutHandler<T extends MinimalRequestEvent = RequestEvent>(
+        defaults: OIDCLogoutOptions = {}
+    ): MinimalRequestHandler<T> {
         return async (event) => {
             const form = await event.request.formData().catch(() => null);
             const postLogoutRedirectUri =
@@ -750,7 +793,11 @@ export function createOIDC<
                 form?.get('clearSessionOnly')?.toString() === 'true' ||
                 defaults.clearSessionOnly;
 
-            return signOut(event, {...defaults, postLogoutRedirectUri, clearSessionOnly});
+            return signOut(event, {
+                ...defaults,
+                postLogoutRedirectUri,
+                clearSessionOnly
+            });
         };
     }
 
@@ -772,7 +819,8 @@ export function createOIDC<
                 const postLogoutRedirectUri =
                     (form.get('postLogoutRedirectUri')?.toString() ||
                         actionOptions.defaultPostLogoutRedirectUri ||
-                        undefined) ?? undefined;
+                        undefined) ??
+                    undefined;
                 const clearSessionOnly =
                     form.get('clearSessionOnly')?.toString() === '1' ||
                     form.get('clearSessionOnly')?.toString() === 'true';
@@ -805,27 +853,29 @@ export function createOIDC<
     }
 
     function createPublicSession(
-        session: TSession | null,
+        session: OIDCSession<TIdentity> | null,
         depends?: (dependency: string) => void
-    ): OIDCPublicSession<TClaims> | null {
+    ): OIDCPublicSession<TIdentity> | null {
         depends?.(OIDC_SESSION_REVALIDATION_DEPENDENCY);
         const publicSession = toPublicSession(session);
 
         return publicSession && depends
-            ? {...publicSession, revalidationDependency: OIDC_SESSION_REVALIDATION_DEPENDENCY}
+            ? {
+                  ...publicSession,
+                  revalidationDependency: OIDC_SESSION_REVALIDATION_DEPENDENCY
+              }
             : publicSession;
     }
 
     return {
         handle,
-        hook,
+        createRequestContext,
         getMetadata,
         getSession,
         getPublicSession: async (event: {
             cookies: RequestEvent['cookies'];
             depends?: (dependency: string) => void;
-        }): Promise<OIDCPublicSession<TClaims> | null> =>
-            createPublicSession(await getSession(event), event.depends),
+        }): Promise<OIDCPublicSession<TIdentity> | null> => createPublicSession(await getSession(event), event.depends),
         toPublicSession: createPublicSession,
         getSessionManagementConfig,
         login: signIn,

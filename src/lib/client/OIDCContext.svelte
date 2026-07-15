@@ -5,7 +5,7 @@
     } from '../server/index.js';
 </script>
 
-<script lang="ts" generics="TClaims extends OIDCUserClaims = OIDCUserClaims">
+<script lang="ts" generics="TIdentity extends OIDCUserClaims = OIDCUserClaims">
     import {beforeNavigate, invalidate, invalidateAll} from '$app/navigation';
     import {tick} from 'svelte';
     import type {Snippet} from 'svelte';
@@ -34,7 +34,7 @@
         onDebug,
         children
     }: {
-        session?: OIDCPublicSession<TClaims> | null;
+        session?: OIDCPublicSession<TIdentity> | null;
         config: OIDCSessionManagementConfig;
         loginPath?: string;
         logoutPath?: string;
@@ -70,18 +70,15 @@
         Boolean(monitorSession && session?.isAuthenticated && session?.sessionState && iframeUrl)
     );
 
-    const context = setOIDCContext<TClaims>({
+    const context = setOIDCContext<TIdentity>({
         get isAuthenticated() {
             return Boolean(session?.isAuthenticated);
         },
         get session() {
             return session;
         },
-        get user() {
-            return session?.user;
-        },
-        get claims() {
-            return session?.claims;
+        get identity() {
+            return session?.identity;
         },
         get groups() {
             return session?.groups ?? [];

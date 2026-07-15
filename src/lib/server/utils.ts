@@ -1,14 +1,7 @@
-import { error } from '@sveltejs/kit';
-import {
-	createCipheriv,
-	createDecipheriv,
-	createHash,
-	createHmac,
-	randomBytes,
-	timingSafeEqual
-} from 'node:crypto';
+import {error} from '@sveltejs/kit';
+import {createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual} from 'node:crypto';
 
-import type { CookieOptions, OIDCPublicSession, OIDCSession, OIDCUserClaims } from './types.js';
+import type {CookieOptions, OIDCPublicSession, OIDCSession, OIDCUserClaims} from './types.js';
 
 export function base64UrlEncode(value: string | Uint8Array): string {
 	const buffer = typeof value === 'string' ? Buffer.from(value, 'utf8') : Buffer.from(value);
@@ -19,7 +12,7 @@ export function createPKCEPair(length = 64) {
 	const verifier = base64UrlEncode(randomBytes(length)).slice(0, length);
 	const challenge = createHash('sha256').update(verifier).digest('base64url');
 
-	return { verifier, challenge };
+	return {verifier, challenge};
 }
 
 export function normalizeIssuer(issuer: string) {
@@ -44,9 +37,7 @@ export function normalizeStringArray(value: unknown): string[] {
 	return [];
 }
 
-export function collectGroups<TClaims extends OIDCUserClaims = OIDCUserClaims>(
-	...sources: Array<TClaims | undefined>
-) {
+export function collectGroups<TClaims extends OIDCUserClaims = OIDCUserClaims>(...sources: Array<TClaims | undefined>) {
 	return [
 		...new Set(
 			sources.flatMap((source) =>
@@ -84,10 +75,7 @@ function cookieEncryptionKey(secret: string) {
 export function serializeSignedCookie(payload: unknown, secret: string) {
 	const iv = randomBytes(12);
 	const cipher = createCipheriv('aes-256-gcm', cookieEncryptionKey(secret), iv);
-	const ciphertext = Buffer.concat([
-		cipher.update(JSON.stringify(payload), 'utf8'),
-		cipher.final()
-	]);
+	const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
 	const tag = cipher.getAuthTag();
 
 	return `v2.${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
@@ -103,10 +91,7 @@ export function parseSignedCookie<T>(value: string | undefined, secret: string):
 		const [, iv, tag, ciphertext] = parts;
 		const decipher = createDecipheriv('aes-256-gcm', cookieEncryptionKey(secret), Buffer.from(iv, 'base64url'));
 		decipher.setAuthTag(Buffer.from(tag, 'base64url'));
-		const plaintext = Buffer.concat([
-			decipher.update(Buffer.from(ciphertext, 'base64url')),
-			decipher.final()
-		]);
+		const plaintext = Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64url')), decipher.final()]);
 
 		return JSON.parse(plaintext.toString('utf8')) as T;
 	} catch {
@@ -124,7 +109,7 @@ export function buildCookieOptions(options?: Partial<CookieOptions>): CookieOpti
 	};
 }
 
-export function parseProviderError(event: { url: URL }) {
+export function parseProviderError(event: {url: URL}) {
 	const code = event.url.searchParams.get('error');
 	if (!code) return null;
 
@@ -168,19 +153,20 @@ export function validateIdTokenClaims(claims: OIDCUserClaims, nonce: string) {
 
 export function validateUserInfoSubject(claims: OIDCUserClaims, user: OIDCUserClaims | undefined) {
 	if (user && user.sub !== claims.sub) {
-		throw error(401, {message: 'UserInfo subject does not match id_token subject'});
+		throw error(401, {
+			message: 'UserInfo subject does not match id_token subject'
+		});
 	}
 }
 
-export function toPublicSession<TClaims extends OIDCUserClaims = OIDCUserClaims>(
-	session: OIDCSession<TClaims> | null
-): OIDCPublicSession<TClaims> | null {
+export function toPublicSession<TIdentity extends OIDCUserClaims = OIDCUserClaims>(
+	session: OIDCSession<TIdentity> | null
+): OIDCPublicSession<TIdentity> | null {
 	if (!session) return null;
 
 	return {
 		isAuthenticated: true,
-		user: session.user,
-		claims: session.claims,
+		identity: session.identity,
 		groups: session.groups,
 		scope: session.tokens.scope,
 		expiresAt: session.tokens.expiresAt,

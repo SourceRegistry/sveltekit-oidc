@@ -1,20 +1,18 @@
 # sveltekit-oidc
 
 [![npm version](https://img.shields.io/npm/v/@sourceregistry/sveltekit-oidc.svg)](https://www.npmjs.com/package/@sourceregistry/sveltekit-oidc)
-[![npm downloads](https://img.shields.io/npm/dm/@sourceregistry/sveltekit-oidc.svg)](https://www.npmjs.com/package/@sourceregistry/sveltekit-oidc)
 [![license](https://img.shields.io/npm/l/@sourceregistry/sveltekit-oidc.svg)](LICENSE)
-[![types](https://img.shields.io/npm/types/@sourceregistry/sveltekit-oidc.svg)](https://www.npmjs.com/package/@sourceregistry/sveltekit-oidc)
 [![Svelte](https://img.shields.io/badge/Svelte-5-ff3e00.svg)](https://svelte.dev/)
-[![publint](https://img.shields.io/badge/publint-passing-brightgreen.svg)](https://publint.dev/@sourceregistry/sveltekit-oidc)
 
-OIDC authentication helpers for SvelteKit with:
+OIDC authentication and session management for SvelteKit.
 
-- server-side login, callback, logout, and session refresh flows
-- token endpoint auth support for `none`, `client_secret_basic`, `client_secret_post`, `client_secret_jwt`, and `private_key_jwt`
-- back-channel logout support through a revocation store
-- encrypted cookie-backed sessions and PKCE/state protection
-- a `handle` hook for attaching auth state to `event.locals`
-- a small `OIDCContext` provider for client-side auth state and session lifecycle handling
+The library keeps three concerns separate:
+
+- provider protocol data: validated ID token claims and optional UserInfo
+- persisted authentication: tokens and the resolved application identity
+- request data: application-owned authorization loaded once per request
+
+It implements the protocol itself and does not depend on `openid-client`.
 
 ## Install
 
@@ -22,179 +20,91 @@ OIDC authentication helpers for SvelteKit with:
 npm install @sourceregistry/sveltekit-oidc
 ```
 
-## Server Setup
+## Configure
 
 ```ts
 // src/lib/server/auth.ts
-import { createOIDC } from '@sourceregistry/sveltekit-oidc/server';
+import {createOIDC} from '@sourceregistry/sveltekit-oidc/server';
 
-export const oidc = createOIDC({
-	issuer: 'https://your-idp.example.com',
+type Identity = {
+	sub: string;
+	email?: string;
+	name?: string;
+	roles: string[];
+};
+
+type RequestData = {
+	permissions: string[];
+};
+
+export const oidc = createOIDC<Identity, RequestData>({
+	issuer: 'https://identity.example.com',
 	clientId: process.env.OIDC_CLIENT_ID!,
 	clientSecret: process.env.OIDC_CLIENT_SECRET!,
-	cookieSecret: process.env.OIDC_COOKIE_SECRET!,
 	clientAuthMethod: 'client_secret_basic',
-	loginPath: '/auth/login',
-	redirectPath: '/auth/callback',
-	scope: 'openid profile email offline_access',
-	backChannelLogoutStore: 'memory',
-	cookieOptions: {
-		secure: process.env.NODE_ENV === 'production'
-	}
-});
-```
-
-```ts
-// src/hooks.server.ts
-import { oidc } from '$lib/server/auth';
-
-export const handle = oidc.handle;
-```
-
-```ts
-// src/routes/auth/login/+server.ts
-import { oidc } from '$lib/server/auth';
-
-export const GET = oidc.loginHandler();
-```
-
-```ts
-// src/routes/auth/callback/+server.ts
-import { oidc } from '$lib/server/auth';
-
-export const GET = oidc.callbackHandler({
-	redirectTo: '/'
-});
-```
-
-```ts
-// src/routes/auth/logout/+server.ts
-import { oidc } from '$lib/server/auth';
-
-export const POST = oidc.logoutHandler();
-```
-
-```ts
-// src/routes/auth/backchannel-logout/+server.ts
-import { oidc } from '$lib/server/auth';
-
-export const POST = oidc.backChannelLogoutHandler();
-```
-
-## Actions
-
-If you prefer form actions instead of dedicated routes:
-
-```ts
-// src/routes/+page.server.ts
-import { oidc } from '$lib/server/auth';
-
-export const actions = oidc.createActions();
-```
-
-## Load Session
-
-```ts
-// src/routes/+layout.server.ts
-import { oidc } from '$lib/server/auth';
-
-export async function load(event) {
-	return {
-		session: await oidc.getPublicSession(event),
-		sessionManagement: await oidc.getSessionManagementConfig()
-	};
-}
-```
-
-## Client Setup
-
-```html
-<script lang="ts">
-	import { OIDCContext } from '@sourceregistry/sveltekit-oidc';
-	let { data } = $props();
-</script>
-
-<OIDCContext
-	session={data.session}
-	config={data.sessionManagement}
-	logoutPath="/auth/logout"
-	monitorSession={false}
-	redirectIfUnauthenticated={false}
->
-	<Account />
-</OIDCContext>
-```
-
-```html
-<!-- src/lib/Account.svelte -->
-<script lang="ts">
-	import { useOIDC } from '@sourceregistry/sveltekit-oidc';
-
-	const oidc = useOIDC();
-</script>
-
-{#if oidc.isAuthenticated}
-	<p>Signed in as {oidc.user?.email ?? oidc.user?.name ?? oidc.session?.sub}</p>
-	<form method="POST" action="/auth/logout">
-		<button type="submit">Sign out</button>
-	</form>
-{:else}
-	<a href="/auth/login?returnTo=%2Faccount">Sign in</a>
-{/if}
-```
-
-`OIDCContext` handles:
-
-- local expiry redirects
-- `check_session_iframe` polling when the provider advertises it
-- targeted session revalidation when a token reaches its renewal window
-- optional periodic session revalidation when `revalidateIntervalMs` is explicitly configured
-- a client context for nested auth-aware components through `useOIDC()` / `getOIDCContext()`
-
-`oidc.getPublicSession(event)` automatically registers the `oidc:session` dependency used by
-`OIDCContext`, so the standard setup above does not re-run unrelated page loads. If you destructure
-the load event, pass both `cookies` and `depends`: `oidc.getPublicSession({cookies, depends})`.
-
-When `oidc.handle` has already loaded an enriched session for the current request, project that
-session without reading or enriching it again:
-
-```ts
-const session = oidc.toPublicSession(event.locals.oidc?.session ?? null, event.depends);
-```
-
-Periodic revalidation is disabled by default to avoid unnecessary page updates. Set
-`revalidateIntervalMs` to a positive interval only when you need polling in addition to token-expiry
-and provider session monitoring. Existing integrations that pass only `cookies` remain compatible;
-their expiry-driven revalidation falls back to `invalidateAll()`.
-
-Set `monitorSession={false}` when you want to keep the client context but leave remote session
-revocation checks to your server-side guard or another mechanism. This disables
-`check_session_iframe` polling without changing the provider metadata exposed through the context.
-
-## Typed Custom Claims
-
-`createOIDC` infers a `TClaims` type from whatever `transformClaims` / `transformUser` / `transformSession` return, and threads it through the session, `event.locals.oidc`, `OIDCPublicSession`, and the client context — no casts needed.
-
-```ts
-// src/lib/server/auth.ts
-export const oidc = createOIDC({
-	issuer: 'https://your-idp.example.com',
-	clientId: process.env.OIDC_CLIENT_ID!,
 	cookieSecret: process.env.OIDC_COOKIE_SECRET!,
-	transformClaims: (claims) => ({
-		...claims,
-		roles: (claims.roles as string[]) ?? [],
-		tenant: claims.tenant as string | undefined
+	scope: ['openid', 'profile', 'email', 'offline_access'],
+
+	resolveIdentity: ({idTokenClaims, userInfo}) => ({
+		sub: idTokenClaims.sub,
+		email: userInfo?.email ?? idTokenClaims.email,
+		name: userInfo?.name ?? idTokenClaims.name,
+		roles: Array.isArray(userInfo?.roles ?? idTokenClaims.roles)
+			? ((userInfo?.roles ?? idTokenClaims.roles) as string[])
+			: []
+	}),
+
+	beforeSessionPersist: async ({session, reason}) => {
+		await synchronizeUser(session.identity, reason);
+	},
+
+	loadRequestData: async ({session, event}) => ({
+		permissions: await loadPermissions(session.sub!, event)
 	})
 });
 ```
 
-Wire `App.Locals` so `event.locals.oidc` is fully typed everywhere — `OIDCLocals` infers everything directly from the instance:
+The three extension points have deliberately literal names:
+
+| Extension point        | When it runs                                                | Persisted               |
+| ---------------------- | ----------------------------------------------------------- | ----------------------- |
+| `resolveIdentity`      | After provider data is validated, on login and refresh      | Its result is persisted |
+| `beforeSessionPersist` | Immediately before a login or refreshed session is written  | Side effects only       |
+| `loadRequestData`      | Once while `handle` builds an authenticated request context | Never                   |
+
+Both login and refresh are explicit in the callback context:
+
+```ts
+beforeSessionPersist: async ({session, reason}) => {
+	if (reason === 'login') {
+		await recordLogin(session.identity);
+	}
+};
+```
+
+## SvelteKit hook
+
+```ts
+// src/hooks.server.ts
+import {oidc} from '$lib/server/auth';
+
+export const handle = oidc.handle;
+```
+
+For every request, `handle` exposes:
+
+```ts
+event.locals.oidc.session; // persisted OIDC session
+event.locals.oidc.identity; // resolved identity
+event.locals.oidc.data; // request-only application data
+```
+
+Type the locals directly from the configured instance:
 
 ```ts
 // src/app.d.ts
-import type { OIDCLocals } from '@sourceregistry/sveltekit-oidc/server';
-import { oidc } from '$lib/server/auth';
+import type {OIDCLocals} from '@sourceregistry/sveltekit-oidc/server';
+import type {oidc} from '$lib/server/auth';
 
 declare global {
 	namespace App {
@@ -207,12 +117,65 @@ declare global {
 export {};
 ```
 
-Now `event.locals.oidc?.claims?.roles` is `string[]` and `?.tenant` is `string | undefined` in every hook, load function, and action — no separate type aliases needed.
+## Routes
 
-`OIDCContext` is a generic component, but Svelte doesn't support passing explicit type arguments in markup — `TClaims` is inferred from the `session` prop instead. Since `data.session` comes from `oidc.getPublicSession(event)`, the type flows through automatically:
+```ts
+// src/routes/auth/login/+server.ts
+import {oidc} from '$lib/server/auth';
+export const GET = oidc.loginHandler();
+```
 
-```html
-<!-- src/routes/+layout.svelte -->
+```ts
+// src/routes/auth/callback/+server.ts
+import {oidc} from '$lib/server/auth';
+export const GET = oidc.callbackHandler();
+```
+
+```ts
+// src/routes/auth/logout/+server.ts
+import {oidc} from '$lib/server/auth';
+export const POST = oidc.logoutHandler();
+```
+
+```ts
+// src/routes/auth/backchannel-logout/+server.ts
+import {oidc} from '$lib/server/auth';
+export const POST = oidc.backChannelLogoutHandler();
+```
+
+The underlying operations are also available directly when a route needs custom behavior:
+
+- `login(event, options)`
+- `handleCallback(event)`
+- `logout(event, options)`
+- `handleBackChannelLogout(event)`
+- `getSession(event)`
+- `requireAuth(event)`
+- `clearSession(cookies)`
+
+## Public session
+
+Load a token-free session for the browser:
+
+```ts
+// src/routes/+layout.server.ts
+import {oidc} from '$lib/server/auth';
+
+export async function load(event) {
+	return {
+		session: oidc.toPublicSession(event.locals.oidc?.session ?? null, event.depends),
+		sessionManagement: await oidc.getSessionManagementConfig()
+	};
+}
+```
+
+`toPublicSession` projects an already-loaded session without reading the store, refreshing tokens,
+or loading request data again. `getPublicSession(event)` is available when the hook has not already
+loaded the session.
+
+## Client context
+
+```svelte
 <script lang="ts">
 	import { OIDCContext } from '@sourceregistry/sveltekit-oidc';
 	let { data, children } = $props();
@@ -223,103 +186,51 @@ Now `event.locals.oidc?.claims?.roles` is `string[]` and `?.tenant` is `string |
 </OIDCContext>
 ```
 
-```html
-<!-- src/lib/Account.svelte -->
+```svelte
 <script lang="ts">
 	import { useOIDC } from '@sourceregistry/sveltekit-oidc';
-
-	const auth = useOIDC(); // TClaims inferred from App.Locals.oidc
+	const oidc = useOIDC();
 </script>
 
-{#if auth.isAuthenticated}
-	<p>Roles: {auth.claims?.roles.join(', ')}</p>
+{#if oidc.isAuthenticated}
+	<p>Signed in as {oidc.identity?.email ?? oidc.identity?.name}</p>
 {/if}
 ```
 
-If `transformClaims` (and friends) are omitted, `TClaims` defaults to `OIDCUserClaims` — existing setups keep working unchanged.
+`OIDCContext` supports local expiry handling, targeted SvelteKit revalidation,
+`check_session_iframe` monitoring, and local or provider logout.
 
-## Typed Custom Session
+## Session stores
 
-Backend apps commonly stash application-specific data on the session itself (e.g. `tenantId`, `permissions`) — not just inside `claims`/`user`. A second generic, `TSession`, is inferred from `transformSession`'s return type and threads through the session store, cookies, `event.locals.oidc`, and `handleCallback`'s result — again with no casts:
-
-```ts
-// src/lib/server/auth.ts
-import { createOIDC, type OIDCSession, type OIDCUserClaims } from '@sourceregistry/sveltekit-oidc/server';
-
-type AppClaims = OIDCUserClaims & { tenant?: string };
-type AppSession = OIDCSession<AppClaims> & {
-	tenantId: string;
-	permissions: string[];
-};
-
-export const oidc = createOIDC({
-	issuer: 'https://your-idp.example.com',
-	clientId: process.env.OIDC_CLIENT_ID!,
-	cookieSecret: process.env.OIDC_COOKIE_SECRET!,
-	transformClaims: (claims) => ({ ...claims, tenant: claims.tenant as string | undefined }),
-	transformSession: (session): AppSession => ({
-		...session,
-		tenantId: session.claims?.tenant ?? 'default',
-		permissions: session.user?.roles ?? []
-	})
-});
-```
-
-`app.d.ts` stays a one-liner — `OIDCLocals` picks up both `TClaims` and `TSession` from the instance:
+Without `sessionStore`, the encrypted session is stored in the cookie. For server-side sessions:
 
 ```ts
-// src/app.d.ts
-import type { OIDCLocals } from '@sourceregistry/sveltekit-oidc/server';
-import { oidc } from '$lib/server/auth';
+import type {OIDCSessionStore} from '@sourceregistry/sveltekit-oidc/server';
 
-declare global {
-	namespace App {
-		interface Locals {
-			oidc?: OIDCLocals<typeof oidc>;
-		}
+const sessionStore: OIDCSessionStore<Identity> = {
+	get: (id) => redis.get(`session:${id}`),
+	set: async (id, session) => {
+		await redis.set(`session:${id}`, session);
+	},
+	delete: async (id) => {
+		await redis.delete(`session:${id}`);
 	}
-}
-
-export {};
+};
 ```
 
-Now `event.locals.oidc?.session?.tenantId` is `string` and `?.permissions` is `string[]` everywhere — and `oidc.requireAuth(event)` / `handleCallback`'s `onsuccess` resolve to `AppSession` directly.
+Use a shared `backChannelLogoutStore` when back-channel logout must work across multiple instances.
+The built-in `'memory'` stores are intended for local development or single-process deployments.
 
-Use `OIDCInferClaims` / `OIDCInferSession` when you need the types explicitly in non-Svelte code (utility functions, API helpers, etc.):
+## Security behavior
 
-```ts
-import type { OIDCInferClaims, OIDCInferSession } from '@sourceregistry/sveltekit-oidc/server';
-import type { oidc } from '$lib/server/auth';
+- Authorization Code flow uses PKCE, state, and nonce.
+- ID tokens are verified against provider JWKS and require matching issuer, audience, nonce, `exp`, and `iat`.
+- UserInfo `sub` must match the validated ID token subject.
+- Cookie sessions use authenticated encryption.
+- Return and post-logout redirect values are restricted to same-origin paths.
+- Local sessions have an eight-hour maximum lifetime by default.
+- Refresh is automatic while a valid refresh token is available.
+- Client authentication supports `none`, `client_secret_basic`, `client_secret_post`, `client_secret_jwt`, and `private_key_jwt`.
 
-type AppClaims = OIDCInferClaims<typeof oidc>;
-type AppSession = OIDCInferSession<typeof oidc>;
-```
-
-If `transformSession` is omitted, `TSession` defaults to `OIDCSession<TClaims>` — existing setups keep working unchanged.
-
-## Example App
-
-This repository now includes a runnable example under [src/routes](C:/Users/alexa/WebstormProjects/github.com/SourceRegistry/sveltekit-oidc/src/routes) and [src/hooks.server.ts](C:/Users/alexa/WebstormProjects/github.com/SourceRegistry/sveltekit-oidc/src/hooks.server.ts).
-
-Set these environment variables to enable it:
-
-- `OIDC_ISSUER`
-- `OIDC_CLIENT_ID`
-- `OIDC_COOKIE_SECRET`
-- optional: `OIDC_CLIENT_SECRET`
-- optional: `OIDC_SCOPE`
-- optional: `OIDC_POST_LOGOUT_REDIRECT_URI`
-
-## Notes
-
-- `cookieSecret` should be a strong random secret and must stay stable across instances.
-- Built-in `returnTo` and logout redirect values are restricted to same-origin paths. Use your own callback `onsuccess` logic if you need custom redirect policy.
-- `clockSkewSeconds` defaults to `30` and tolerates small clock drift between your app and the identity provider.
-- Local browser sessions expire after 8 hours by default (`sessionMaxAgeSeconds`). They also end when an unrefreshable access token expires; set a shorter value for higher-risk applications.
-- `createInMemoryBackChannelLogoutStore()` is suitable for local development or single-instance deployments. Use Redis, SQL, or another shared store for production.
-- The library validates `id_token` and `logout_token` values through `@sourceregistry/node-jwt` and provider JWKS metadata. ID tokens must contain `exp`, `iat`, and a matching nonce; UserInfo subjects must match the validated ID token.
-- `groups` are normalized onto the session from `groups` and `roles` claims when present.
-- Use `transformClaims`, `transformUser`, and `transformSession` to project provider-specific claims into your own session shape.
-- `check_session_iframe` monitoring only runs when `monitorSession` is enabled, the provider advertises that endpoint, and the session includes `session_state`.
-- Refresh token handling is automatic when a valid refresh token is present.
-- `event.locals.oidc` is attached by the hook; wire it in `app.d.ts` with `OIDCLocals<typeof oidc>` — see [Typed Custom Claims](#typed-custom-claims).
+Application code can normalize provider-specific data in `resolveIdentity`, but cannot replace the
+validated ID token claims used by the protocol implementation.

@@ -1,15 +1,18 @@
-import { getContext, hasContext, setContext } from 'svelte';
+import {getContext, hasContext, setContext} from 'svelte';
 
-import type { OIDCDiscoveryDocument, OIDCHandleLocals, OIDCPublicSession, OIDCUserClaims } from '../server/index.js';
+import type {OIDCDiscoveryDocument, OIDCHandleLocals, OIDCPublicSession, OIDCUserClaims} from '../server/index.js';
 
-type LocalsClaims = App.Locals extends { oidc?: OIDCHandleLocals<infer C, any> } ? C : OIDCUserClaims;
+type LocalsIdentity = App.Locals extends {
+	oidc?: OIDCHandleLocals<infer I, any>;
+}
+	? I
+	: OIDCUserClaims;
 
-export type OIDCClientContextValue<TClaims extends OIDCUserClaims = OIDCUserClaims> = {
+export type OIDCClientContextValue<TIdentity extends OIDCUserClaims = OIDCUserClaims> = {
 	isAuthenticated: boolean;
-	session: OIDCPublicSession<TClaims> | null;
-	user: OIDCPublicSession<TClaims>['user'];
-	claims: OIDCPublicSession<TClaims>['claims'];
-	groups: OIDCPublicSession<TClaims>['groups'];
+	session: OIDCPublicSession<TIdentity> | null;
+	identity: OIDCPublicSession<TIdentity>['identity'] | undefined;
+	groups: OIDCPublicSession<TIdentity>['groups'];
 	issuer: string;
 	metadata?: Pick<
 		OIDCDiscoveryDocument,
@@ -28,21 +31,21 @@ export type OIDCClientContextValue<TClaims extends OIDCUserClaims = OIDCUserClai
 
 const OIDC_CONTEXT_KEY = Symbol('sveltekit-oidc-context');
 
-export function setOIDCContext<TClaims extends OIDCUserClaims = OIDCUserClaims>(
-	value: OIDCClientContextValue<TClaims>
-): OIDCClientContextValue<TClaims> {
+export function setOIDCContext<TIdentity extends OIDCUserClaims = OIDCUserClaims>(
+	value: OIDCClientContextValue<TIdentity>
+): OIDCClientContextValue<TIdentity> {
 	setContext(OIDC_CONTEXT_KEY, value);
 	return value;
 }
 
-export function getOIDCContext<TClaims extends OIDCUserClaims = LocalsClaims>(): OIDCClientContextValue<TClaims> {
-	return getContext<OIDCClientContextValue<TClaims>>(OIDC_CONTEXT_KEY);
+export function getOIDCContext<TIdentity extends OIDCUserClaims = LocalsIdentity>(): OIDCClientContextValue<TIdentity> {
+	return getContext<OIDCClientContextValue<TIdentity>>(OIDC_CONTEXT_KEY);
 }
 
-export function useOIDC<TClaims extends OIDCUserClaims = LocalsClaims>(): OIDCClientContextValue<TClaims> {
+export function useOIDC<TIdentity extends OIDCUserClaims = LocalsIdentity>(): OIDCClientContextValue<TIdentity> {
 	if (!hasContext(OIDC_CONTEXT_KEY)) {
 		throw new Error('OIDC context is not available. Wrap this component tree with <OIDCContext>.');
 	}
 
-	return getOIDCContext<TClaims>();
+	return getOIDCContext<TIdentity>();
 }

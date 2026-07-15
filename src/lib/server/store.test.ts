@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { createInMemoryBackChannelLogoutStore, createInMemorySessionStore } from './store.js';
+import {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
 
 describe('createInMemoryBackChannelLogoutStore', () => {
 	it('revokes by sid', async () => {
@@ -20,6 +20,8 @@ describe('createInMemoryBackChannelLogoutStore', () => {
 				clientId: 'client',
 				sid: 'sid-1',
 				groups: [],
+				idTokenClaims: {sub: 'user-1'},
+				identity: {sub: 'user-1'},
 				tokens: {
 					accessToken: 'access',
 					tokenType: 'Bearer',
@@ -48,6 +50,8 @@ describe('createInMemoryBackChannelLogoutStore', () => {
 				clientId: 'client',
 				sub: 'user-1',
 				groups: [],
+				idTokenClaims: {sub: 'user-1'},
+				identity: {sub: 'user-1'},
 				tokens: {
 					accessToken: 'access',
 					tokenType: 'Bearer',
@@ -68,6 +72,8 @@ describe('createInMemorySessionStore', () => {
 			clientId: 'client',
 			sub: 'user-1',
 			groups: ['admin'],
+			idTokenClaims: {sub: 'user-1'},
+			identity: {sub: 'user-1'},
 			tokens: {
 				accessToken: 'access',
 				tokenType: 'Bearer',
