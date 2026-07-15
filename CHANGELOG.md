@@ -1,3 +1,18 @@
+# [2.0.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.8.0...v2.0.0) (2026-07-15)
+
+
+* feat!: redesign identity and session lifecycle API ([f66e387](https://github.com/SourceRegistry/sveltekit-oidc/commit/f66e387a21c524b8645dabfdf3e0605efa30b68e))
+
+
+### Features
+
+* add configurable public session projection ([ec9f080](https://github.com/SourceRegistry/sveltekit-oidc/commit/ec9f0807c3662c0d19662152cba4cc213c2d385c))
+
+
+### BREAKING CHANGES
+
+* replace transformClaims, transformUser, transformSession, and enrichSession with resolveIdentity, beforeSessionPersist, and loadRequestData; expose identity and request data separately.
+
 # [1.8.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.7.0...v1.8.0) (2026-07-15)
 
 
