@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.7.0...v1.8.0) (2026-07-15)
+
+
+### Features
+
+* expose public session projection ([8616a91](https://github.com/SourceRegistry/sveltekit-oidc/commit/8616a91ce807cfe2e8ce96b44a7914b0dcd516e6))
+
 # [1.7.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.14...v1.7.0) (2026-07-15)
 
 
