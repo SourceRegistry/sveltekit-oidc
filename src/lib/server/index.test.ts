@@ -82,6 +82,42 @@ describe('OIDC public session revalidation', () => {
 		expect(depends).toHaveBeenCalledOnce();
 		expect(depends).toHaveBeenCalledWith('oidc:session');
 	});
+
+	it('projects an already loaded session without reading or enriching it again', () => {
+		const enrichSession = vi.fn();
+		const oidc = createOIDC({
+			issuer: 'https://identity.example/realms/test',
+			clientId: 'client-app',
+			cookieSecret,
+			endpoints: {
+				issuer: 'https://identity.example/realms/test',
+				authorization_endpoint: 'https://identity.example/authorize',
+				token_endpoint: 'https://identity.example/token'
+			},
+			enrichSession
+		});
+		const depends = vi.fn();
+		const session = {
+			issuer: 'https://identity.example/realms/test',
+			clientId: 'client-app',
+			sub: 'user-1',
+			groups: ['admin'],
+			tokens: {accessToken: 'access', tokenType: 'Bearer', scope: ['openid']},
+			createdAt: Math.floor(Date.now() / 1000),
+			refreshedAt: Math.floor(Date.now() / 1000)
+		} satisfies OIDCSession;
+
+		const result = oidc.toPublicSession(session, depends);
+
+		expect(enrichSession).not.toHaveBeenCalled();
+		expect(depends).toHaveBeenCalledWith('oidc:session');
+		expect(result).toMatchObject({
+			isAuthenticated: true,
+			sub: 'user-1',
+			groups: ['admin'],
+			revalidationDependency: 'oidc:session'
+		});
+	});
 });
 
 describe('OIDC session enrichment', () => {

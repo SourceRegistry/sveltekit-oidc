@@ -155,6 +155,13 @@ export async function load(event) {
 `OIDCContext`, so the standard setup above does not re-run unrelated page loads. If you destructure
 the load event, pass both `cookies` and `depends`: `oidc.getPublicSession({cookies, depends})`.
 
+When `oidc.handle` has already loaded an enriched session for the current request, project that
+session without reading or enriching it again:
+
+```ts
+const session = oidc.toPublicSession(event.locals.oidc?.session ?? null, event.depends);
+```
+
 Periodic revalidation is disabled by default to avoid unnecessary page updates. Set
 `revalidateIntervalMs` to a positive interval only when you need polling in addition to token-expiry
 and provider session monitoring. Existing integrations that pass only `cookies` remain compatible;

@@ -367,6 +367,11 @@ export type OIDCInstance<
 		cookies: Cookies;
 		depends?: (dependency: string) => void;
 	}) => Promise<OIDCPublicSession<TClaims> | null>;
+	/** Projects an already-loaded session without reading, refreshing, or enriching it again. */
+	toPublicSession: (
+		session: TSession | null,
+		depends?: (dependency: string) => void
+	) => OIDCPublicSession<TClaims> | null;
 	getSessionManagementConfig: () => Promise<OIDCSessionManagementConfig>;
 	login: (event: MinimalRequestEvent, loginOptions?: OIDCLoginOptions) => Promise<never>;
 	logout: (event: MinimalRequestEvent, logoutOptions?: OIDCLogoutOptions) => Promise<never>;

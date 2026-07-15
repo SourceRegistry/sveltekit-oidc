@@ -804,6 +804,18 @@ export function createOIDC<
         };
     }
 
+    function createPublicSession(
+        session: TSession | null,
+        depends?: (dependency: string) => void
+    ): OIDCPublicSession<TClaims> | null {
+        depends?.(OIDC_SESSION_REVALIDATION_DEPENDENCY);
+        const publicSession = toPublicSession(session);
+
+        return publicSession && depends
+            ? {...publicSession, revalidationDependency: OIDC_SESSION_REVALIDATION_DEPENDENCY}
+            : publicSession;
+    }
+
     return {
         handle,
         hook,
@@ -812,14 +824,9 @@ export function createOIDC<
         getPublicSession: async (event: {
             cookies: RequestEvent['cookies'];
             depends?: (dependency: string) => void;
-        }): Promise<OIDCPublicSession<TClaims> | null> => {
-            event.depends?.(OIDC_SESSION_REVALIDATION_DEPENDENCY);
-            const session = toPublicSession(await getSession(event));
-
-            return session && event.depends
-                ? {...session, revalidationDependency: OIDC_SESSION_REVALIDATION_DEPENDENCY}
-                : session;
-        },
+        }): Promise<OIDCPublicSession<TClaims> | null> =>
+            createPublicSession(await getSession(event), event.depends),
+        toPublicSession: createPublicSession,
         getSessionManagementConfig,
         login: signIn,
         logout: signOut,
