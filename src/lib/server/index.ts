@@ -480,7 +480,11 @@ export function createOIDC<
     }
 
     async function getSession(event: { cookies: Cookies }) {
-        return maybeRefreshSession(event.cookies, await readPersistedSession(event.cookies));
+        const session = await maybeRefreshSession(event.cookies, await readPersistedSession(event.cookies));
+        if (!session || !options.enrichSession) {
+            return session;
+        }
+        return options.enrichSession(session, {event: event as MinimalRequestEvent});
     }
 
     async function signIn(event: { cookies: Cookies, url: URL }, loginOptions: OIDCLoginOptions = {}): Promise<never> {

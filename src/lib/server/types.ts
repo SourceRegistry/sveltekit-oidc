@@ -240,6 +240,19 @@ export type OIDCOptions<
 			isRefresh: boolean;
 		}
 	) => MaybePromise<TSession>;
+	/**
+	 * Runs on every `getSession` read (and therefore every `getPublicSession`,
+	 * `hook()`-provided `requireAuth`, and the instance-level `requireAuth`) —
+	 * unlike `transformSession`, which only fires on session creation and token
+	 * refresh. Use this to keep data your app owns outside the token (e.g. roles
+	 * or memberships stored in your own database) fresh without waiting for a
+	 * refresh. Only invoked when a session is present; the result is not persisted
+	 * back to the session store.
+	 */
+	enrichSession?: (
+		session: TSession,
+		context: { event?: MinimalRequestEvent }
+	) => MaybePromise<TSession>;
 	endpoints?: Partial<OIDCDiscoveryDocument>;
 	logger?: OIDCLogger | false;
 	/**

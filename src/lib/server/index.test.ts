@@ -2,6 +2,8 @@ import {isRedirect, type Cookies} from '@sveltejs/kit';
 import {describe, expect, it, vi} from 'vitest';
 
 import {createOIDC} from './index.js';
+import {serializeSignedCookie} from './utils.js';
+import type {OIDCSession} from './types.js';
 
 const createCookies = (): Cookies =>
 	({
@@ -11,6 +13,19 @@ const createCookies = (): Cookies =>
 		delete: vi.fn(),
 		serialize: vi.fn()
 	}) as unknown as Cookies;
+
+const cookieSecret = 'test-cookie-secret';
+
+const createCookiesWithSession = (session: OIDCSession): Cookies => {
+	const value = serializeSignedCookie(session, cookieSecret);
+	return {
+		get: vi.fn((name: string) => (name === 'oidc_session' ? value : undefined)),
+		getAll: vi.fn(() => []),
+		set: vi.fn(),
+		delete: vi.fn(),
+		serialize: vi.fn()
+	} as unknown as Cookies;
+};
 
 describe('OIDC logout', () => {
 	it('includes client_id when redirecting to the provider without a local session', async () => {
@@ -66,5 +81,59 @@ describe('OIDC public session revalidation', () => {
 
 		expect(depends).toHaveBeenCalledOnce();
 		expect(depends).toHaveBeenCalledWith('oidc:session');
+	});
+});
+
+describe('OIDC session enrichment', () => {
+	const baseSession = {
+		issuer: 'https://identity.example/realms/test',
+		clientId: 'client-app',
+		groups: [],
+		tokens: {accessToken: 'access', tokenType: 'Bearer', scope: ['openid']},
+		createdAt: Math.floor(Date.now() / 1000),
+		refreshedAt: Math.floor(Date.now() / 1000)
+	} satisfies OIDCSession;
+
+	it('runs enrichSession on a plain read, not just on refresh/creation', async () => {
+		const enrichSession = vi.fn(async (session: OIDCSession) => ({
+			...session,
+			user: {sub: 'enriched-user'}
+		}));
+		const oidc = createOIDC({
+			issuer: 'https://identity.example/realms/test',
+			clientId: 'client-app',
+			cookieSecret,
+			endpoints: {
+				issuer: 'https://identity.example/realms/test',
+				authorization_endpoint: 'https://identity.example/authorize',
+				token_endpoint: 'https://identity.example/token'
+			},
+			enrichSession
+		});
+
+		const session = await oidc.getSession({cookies: createCookiesWithSession(baseSession)});
+
+		expect(enrichSession).toHaveBeenCalledOnce();
+		expect(session?.user).toEqual({sub: 'enriched-user'});
+	});
+
+	it('is skipped when there is no session to enrich', async () => {
+		const enrichSession = vi.fn(async (session: OIDCSession) => session);
+		const oidc = createOIDC({
+			issuer: 'https://identity.example/realms/test',
+			clientId: 'client-app',
+			cookieSecret,
+			endpoints: {
+				issuer: 'https://identity.example/realms/test',
+				authorization_endpoint: 'https://identity.example/authorize',
+				token_endpoint: 'https://identity.example/token'
+			},
+			enrichSession
+		});
+
+		const session = await oidc.getSession({cookies: createCookies()});
+
+		expect(enrichSession).not.toHaveBeenCalled();
+		expect(session).toBeNull();
 	});
 });
