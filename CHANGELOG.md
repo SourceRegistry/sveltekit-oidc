@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.14...v1.7.0) (2026-07-15)
+
+
+### Features
+
+* add enrichSession hook for per-request session enrichment ([28af6b2](https://github.com/SourceRegistry/sveltekit-oidc/commit/28af6b282e1a0637a18d42221c4881046a0ad399))
+
 ## [1.6.14](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.6.13...v1.6.14) (2026-07-13)
 
 
