@@ -1,3 +1,10 @@
+## [2.0.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v2.0.0...v2.0.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* keep iframe errors from revoking sessions ([6fff691](https://github.com/SourceRegistry/sveltekit-oidc/commit/6fff691ec0abcc3723efd0f0449309d94d1a10b3))
+
 # [2.0.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v1.8.0...v2.0.0) (2026-07-15)
 
 
