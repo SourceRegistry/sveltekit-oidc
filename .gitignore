@@ -30,3 +30,7 @@ vite.config.ts.timestamp-*
 # Generated
 docs
 coverage
+.mcp.json
+.codex
+.claude
+.nova-ai

@@ -11,6 +11,7 @@
     import type {Snippet} from 'svelte';
 
     import {setOIDCContext} from './context.js';
+    import {classifySessionMonitorMessage} from './session-monitor.js';
 
     type RedirectMode = 'login' | 'logout' | 'reload' | 'none';
 
@@ -298,11 +299,19 @@
         }, checkSessionIntervalMs);
 
         const onMessage = (event: MessageEvent) => {
-            if (event.origin !== targetOrigin || typeof event.data !== 'string') {
+            if (event.origin !== targetOrigin) {
                 return;
             }
-            if (event.data === 'changed' || event.data === 'error') {
-                debug('iframe_session_event', {result: event.data, origin: event.origin});
+
+            const result = classifySessionMonitorMessage(event.data);
+            if (result === 'error') {
+                // `error` means the OP could not determine session state (for example,
+                // transient storage or network denial). It is not proof of revocation.
+                debug('iframe_session_error', {origin: event.origin});
+                return;
+            }
+            if (result === 'changed') {
+                debug('iframe_session_event', {result, origin: event.origin});
                 status = 'revoked';
                 void logout(true).then(() => handleRedirect(redirectOnRevoked));
             }
