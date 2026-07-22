@@ -211,6 +211,12 @@ returns. `getPublicSession(event)` is available when the hook has not already lo
 `OIDCContext` supports local expiry handling, targeted SvelteKit revalidation,
 `check_session_iframe` monitoring, and local or provider logout.
 
+When the OP iframe reports `changed`, the component first performs the Session Management 1.0
+`prompt=none` authorization check in a hidden iframe. The login handler supplies the current ID token
+as `id_token_hint`; a matching End-User refreshes the local session, while an OP error or a different
+End-User clears it. Applications using the standard `loginHandler()` and `callbackHandler()` routes do
+not need an additional endpoint.
+
 ## Session stores
 
 Without `sessionStore`, the encrypted session is stored in the cookie. For server-side sessions:

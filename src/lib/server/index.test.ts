@@ -3,7 +3,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {createOIDC} from './index.js';
 import {serializeSignedCookie} from './utils.js';
-import type {OIDCHandleLocals, OIDCSession, OIDCUserClaims} from './types.js';
+import type {OIDCHandleLocals, OIDCSession, OIDCStateCookie, OIDCUserClaims} from './types.js';
 
 const createCookies = (): Cookies =>
 	({
@@ -26,6 +26,15 @@ const createCookiesWithSession = (session: OIDCSession): Cookies => {
 		serialize: vi.fn()
 	} as unknown as Cookies;
 };
+
+const createCookiesWithValues = (values: Record<string, string>): Cookies =>
+	({
+		get: vi.fn((name: string) => values[name]),
+		getAll: vi.fn(() => []),
+		set: vi.fn(),
+		delete: vi.fn(),
+		serialize: vi.fn()
+	}) as unknown as Cookies;
 
 const createRequestContext = <TData>(session: OIDCSession, data: TData): OIDCHandleLocals<OIDCUserClaims, TData> => ({
 	isAuthenticated: true,
@@ -69,6 +78,87 @@ describe('OIDC logout', () => {
 			expect(location.searchParams.get('post_logout_redirect_uri')).toBe('https://app.example/signed-out');
 			expect(location.searchParams.has('id_token_hint')).toBe(false);
 		}
+	});
+});
+
+describe('OIDC session-management re-authentication', () => {
+	const session = {
+		issuer: 'https://identity.example/realms/test',
+		clientId: 'client-app',
+		nonce: 'original-nonce',
+		sub: 'user-1',
+		groups: [],
+		idTokenClaims: {sub: 'user-1'},
+		identity: {sub: 'user-1'},
+		tokens: {
+			accessToken: 'access-token',
+			tokenType: 'Bearer',
+			idToken: 'original-id-token',
+			scope: ['openid']
+		},
+		createdAt: Math.floor(Date.now() / 1000),
+		refreshedAt: Math.floor(Date.now() / 1000)
+	} satisfies OIDCSession;
+
+	it('passes prompt=none and the current ID token hint to the authorization endpoint', async () => {
+		const oidc = createOIDC({
+			issuer: session.issuer,
+			clientId: session.clientId,
+			cookieSecret,
+			endpoints: {
+				issuer: session.issuer,
+				authorization_endpoint: 'https://identity.example/authorize',
+				token_endpoint: 'https://identity.example/token'
+			}
+		});
+		const handler = oidc.loginHandler();
+		const url = new URL('https://app.example/auth/login?prompt=none&returnTo=%2Fdashboard');
+
+		try {
+			await handler({cookies: createCookiesWithSession(session), request: new Request(url), url} as never);
+			expect.fail('Expected authorization redirect');
+		} catch (error) {
+			expect(isRedirect(error)).toBe(true);
+			const location = new URL((error as {location: string}).location);
+			expect(location.searchParams.get('prompt')).toBe('none');
+			expect(location.searchParams.get('id_token_hint')).toBe('original-id-token');
+		}
+	});
+
+	it('clears the local session when prompt=none reports that the OP session is gone', async () => {
+		const state = {
+			state: 'silent-state',
+			nonce: 'silent-nonce',
+			codeVerifier: 'silent-verifier',
+			returnTo: '/dashboard',
+			prompt: 'none',
+			originalSub: 'user-1',
+			createdAt: Math.floor(Date.now() / 1000)
+		} satisfies OIDCStateCookie;
+		const cookies = createCookiesWithValues({
+			oidc_session: serializeSignedCookie(session, cookieSecret),
+			oidc_auth_state: serializeSignedCookie(state, cookieSecret)
+		});
+		const oidc = createOIDC({
+			issuer: session.issuer,
+			clientId: session.clientId,
+			cookieSecret,
+			endpoints: {
+				issuer: session.issuer,
+				authorization_endpoint: 'https://identity.example/authorize',
+				token_endpoint: 'https://identity.example/token'
+			}
+		});
+		const handler = oidc.callbackHandler();
+		const url = new URL(
+			'https://app.example/auth/callback?error=login_required&state=silent-state'
+		);
+
+		const response = await handler({cookies, request: new Request(url), url} as never);
+		expect(response.status).toBe(200);
+		expect(await response.text()).toContain('data-oidc-silent-reauth="logged_out"');
+		expect(cookies.delete).toHaveBeenCalledWith('oidc_session', expect.any(Object));
+		expect(cookies.delete).toHaveBeenCalledWith('oidc_auth_state', expect.any(Object));
 	});
 });
 

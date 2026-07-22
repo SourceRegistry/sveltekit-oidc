@@ -49,6 +49,25 @@ export type * from './types.js';
 export {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
 
 const OIDC_SESSION_REVALIDATION_DEPENDENCY = 'oidc:session';
+const LOGIN_PROMPTS = new Set<NonNullable<OIDCLoginOptions['prompt']>>([
+    'login',
+    'consent',
+    'none',
+    'select_account'
+]);
+
+function silentReauthenticationResponse(status: 'authenticated' | 'logged_out') {
+    return new Response(
+        `<!doctype html><html lang="en" data-oidc-silent-reauth="${status}"><head><meta charset="utf-8"><title>OIDC session check</title></head><body></body></html>`,
+        {
+            headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'no-store',
+                'Content-Security-Policy': "default-src 'none'; frame-ancestors 'self'"
+            }
+        }
+    );
+}
 
 function buildLogger(logger: OIDCLogger | false | undefined): Required<OIDCLogger> {
     const noop = () => {};
@@ -533,12 +552,15 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         const state = base64UrlEncode(randomBytes(24));
         const nonce = base64UrlEncode(randomBytes(24));
         const returnTo = internalRedirectPath(event, loginOptions.returnTo ?? options.defaultLoginRedirect, '/');
+        const existingSession = loginOptions.prompt === 'none' ? await readPersistedSession(event.cookies) : null;
 
         cookieStore.writeState(event.cookies, {
             state,
             nonce,
             codeVerifier: pkce.verifier,
             returnTo,
+            prompt: loginOptions.prompt,
+            originalSub: existingSession?.session.sub,
             createdAt: Math.floor(Date.now() / 1000)
         });
 
@@ -558,6 +580,9 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         }
         if (loginOptions.prompt) {
             authorizationUrl.searchParams.set('prompt', loginOptions.prompt);
+        }
+        if (loginOptions.prompt === 'none' && existingSession?.session.tokens.idToken) {
+            authorizationUrl.searchParams.set('id_token_hint', existingSession.session.tokens.idToken);
         }
         for (const [key, value] of Object.entries(loginOptions.extraParams ?? {})) {
             authorizationUrl.searchParams.set(key, value);
@@ -597,6 +622,9 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         }
 
         const idTokenClaims = await validateIdToken(tokenResponse.id_token, stateCookie.nonce);
+        if (stateCookie.prompt === 'none' && stateCookie.originalSub && idTokenClaims.sub !== stateCookie.originalSub) {
+            throw error(401, {message: 'Silent re-authentication returned a different End-User'});
+        }
         const userInfo =
             options.fetchUserInfo === false
                 ? undefined
@@ -626,7 +654,8 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             event: event as MinimalRequestEvent,
             tokenResponse
         });
-        await writePersistedSession(event.cookies, session);
+        const existingSession = stateCookie.prompt === 'none' ? await readPersistedSession(event.cookies) : null;
+        await writePersistedSession(event.cookies, session, existingSession?.id);
 
         return {
             session,
@@ -753,7 +782,11 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     ): MinimalRequestHandler<T> {
         return async (event) => {
             const returnTo = event.url.searchParams.get('returnTo') ?? defaults.returnTo;
-            return signIn(event, {...defaults, returnTo});
+            const requestedPrompt = event.url.searchParams.get('prompt');
+            const prompt = requestedPrompt && LOGIN_PROMPTS.has(requestedPrompt as NonNullable<OIDCLoginOptions['prompt']>)
+                ? requestedPrompt as NonNullable<OIDCLoginOptions['prompt']>
+                : defaults.prompt;
+            return signIn(event, {...defaults, returnTo, prompt});
         };
     }
 
@@ -761,12 +794,27 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         handlerOptions: OIDCCallbackHandlerOptions<TIdentity> = {}
     ): MinimalRequestHandler<T> {
         return async (event) => {
+            const stateCookie = cookieStore.readState(event.cookies);
+            const callbackState = event.url.searchParams.get('state');
+            const isSilentReauthentication = Boolean(
+                stateCookie?.prompt === 'none' && callbackState && callbackState === stateCookie.state
+            );
             try {
                 const result = await handleCallback(event);
+                if (isSilentReauthentication) {
+                    return silentReauthenticationResponse('authenticated');
+                }
                 const response = await handlerOptions.onsuccess?.(event, result);
                 if (response) return response;
                 throw redirect(302, internalRedirectPath(event, handlerOptions.redirectTo ?? result.returnTo, '/'));
             } catch (err) {
+                if (isSilentReauthentication) {
+                    cookieStore.clearState(event.cookies);
+                    const persisted = await readPersistedSession(event.cookies);
+                    await clearPersistedSession(event.cookies, persisted?.id);
+                    log.debug('Silent OIDC re-authentication failed — clearing local session');
+                    return silentReauthenticationResponse('logged_out');
+                }
                 const response = await handlerOptions.onfailure?.(event, err);
                 if (response) {
                     return response;

@@ -7,11 +7,11 @@
 
 <script lang="ts" generics="TIdentity extends OIDCUserClaims = OIDCUserClaims">
     import {beforeNavigate, invalidate, invalidateAll} from '$app/navigation';
-    import {tick} from 'svelte';
+    import {onDestroy, tick} from 'svelte';
     import type {Snippet} from 'svelte';
 
     import {setOIDCContext} from './context.js';
-    import {classifySessionMonitorMessage} from './session-monitor.js';
+    import {classifySessionMonitorEvent} from './session-monitor.js';
 
     type RedirectMode = 'login' | 'logout' | 'reload' | 'none';
 
@@ -51,7 +51,10 @@
         children?: Snippet;
     } = $props();
 
-    let iframe = $state<HTMLIFrameElement | undefined>(undefined);
+    let sessionIframe = $state<HTMLIFrameElement | undefined>(undefined);
+    let silentReauthenticationIframe = $state<HTMLIFrameElement | undefined>(undefined);
+    let silentReauthenticationUrl = $state<string | undefined>(undefined);
+    let silentReauthenticationTimeout: number | undefined;
     let status = $state<'authenticated' | 'unauthenticated' | 'expired' | 'revoked'>('unauthenticated');
     let revalidating = $state(false);
     let handledUnauthenticated = $state(false);
@@ -113,8 +116,14 @@
         }
     });
 
-    function buildLoginUrl(returnTo = `${window.location.pathname}${window.location.search}`) {
-        return `${resolvedLoginPath}?returnTo=${encodeURIComponent(returnTo)}`;
+    function buildLoginUrl(
+        returnTo = `${window.location.pathname}${window.location.search}`,
+        prompt?: 'none'
+    ) {
+        const url = new URL(resolvedLoginPath, window.location.href);
+        url.searchParams.set('returnTo', returnTo);
+        if (prompt) url.searchParams.set('prompt', prompt);
+        return `${url.pathname}${url.search}${url.hash}`;
     }
 
     async function logout(clearSessionOnly = false) {
@@ -204,6 +213,58 @@
         login();
     }
 
+    async function finishSilentReauthentication(result: 'authenticated' | 'logged_out') {
+        if (silentReauthenticationTimeout) {
+            window.clearTimeout(silentReauthenticationTimeout);
+            silentReauthenticationTimeout = undefined;
+        }
+        silentReauthenticationUrl = undefined;
+        await revalidate();
+        await tick();
+
+        if (result === 'authenticated' && session?.isAuthenticated) {
+            status = 'authenticated';
+            debug('silent_reauthentication_completed', {sub: session.sub});
+            return;
+        }
+
+        status = 'revoked';
+        debug('silent_reauthentication_logged_out');
+        await handleRedirect(redirectOnRevoked);
+    }
+
+    function startSilentReauthentication() {
+        if (silentReauthenticationUrl) return;
+
+        debug('silent_reauthentication_started');
+        silentReauthenticationUrl = buildLoginUrl(
+            `${window.location.pathname}${window.location.search}`,
+            'none'
+        );
+        silentReauthenticationTimeout = window.setTimeout(() => {
+            debug('silent_reauthentication_timed_out');
+            void logout(true).then(() => finishSilentReauthentication('logged_out'));
+        }, 30_000);
+    }
+
+    function handleSilentReauthenticationLoad() {
+        if (!silentReauthenticationUrl || !silentReauthenticationIframe?.contentWindow) return;
+
+        try {
+            const documentElement = silentReauthenticationIframe.contentWindow.document.documentElement;
+            const result = documentElement.dataset.oidcSilentReauth;
+            if (result === 'authenticated' || result === 'logged_out') {
+                void finishSilentReauthentication(result);
+            }
+        } catch {
+            // The authorization request is currently displaying the cross-origin OP document.
+        }
+    }
+
+    onDestroy(() => {
+        if (silentReauthenticationTimeout) window.clearTimeout(silentReauthenticationTimeout);
+    });
+
     $effect(() => {
         const isAuthenticated = Boolean(session?.isAuthenticated);
         // Suppress authenticated→unauthenticated transition while a revalidation is
@@ -285,25 +346,21 @@
     });
 
     $effect(() => {
-        if (!canMonitorIframe || !iframeUrl || !iframe) {
+        if (!canMonitorIframe || !iframeUrl || !sessionIframe) {
             return;
         }
 
         const targetOrigin = new URL(iframeUrl).origin;
         const poll = window.setInterval(() => {
-            if (!iframe?.contentWindow || !session?.sessionState) {
+            if (!sessionIframe?.contentWindow || !session?.sessionState) {
                 return;
             }
 
-            iframe.contentWindow.postMessage(`${config.clientId} ${session.sessionState}`, targetOrigin);
+            sessionIframe.contentWindow.postMessage(`${config.clientId} ${session.sessionState}`, targetOrigin);
         }, checkSessionIntervalMs);
 
         const onMessage = (event: MessageEvent) => {
-            if (event.origin !== targetOrigin) {
-                return;
-            }
-
-            const result = classifySessionMonitorMessage(event.data);
+            const result = classifySessionMonitorEvent(event, targetOrigin, sessionIframe?.contentWindow);
             if (result === 'error') {
                 // `error` means the OP could not determine session state (for example,
                 // transient storage or network denial). It is not proof of revocation.
@@ -312,8 +369,7 @@
             }
             if (result === 'changed') {
                 debug('iframe_session_event', {result, origin: event.origin});
-                status = 'revoked';
-                void logout(true).then(() => handleRedirect(redirectOnRevoked));
+                startSilentReauthentication();
             }
         };
 
@@ -328,9 +384,21 @@
 
 {#if canMonitorIframe && iframeUrl}
     <iframe
-            bind:this={iframe}
+            id="oidc-session-monitor"
+            bind:this={sessionIframe}
             title="OIDC session monitor"
             src={iframeUrl}
+            hidden
+            aria-hidden="true"
+    ></iframe>
+{/if}
+
+{#if silentReauthenticationUrl}
+    <iframe
+            bind:this={silentReauthenticationIframe}
+            title="OIDC silent re-authentication"
+            src={silentReauthenticationUrl}
+            onload={handleSilentReauthenticationLoad}
             hidden
             aria-hidden="true"
     ></iframe>

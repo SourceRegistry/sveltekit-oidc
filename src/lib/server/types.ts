@@ -291,6 +291,8 @@ export type OIDCStateCookie = {
 	nonce: string;
 	codeVerifier: string;
 	returnTo: string;
+	prompt?: OIDCLoginOptions['prompt'];
+	originalSub?: string;
 	createdAt: number;
 };
 
