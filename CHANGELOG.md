@@ -1,3 +1,10 @@
+## [2.0.2](https://github.com/SourceRegistry/sveltekit-oidc/compare/v2.0.1...v2.0.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* reauthenticate changed OIDC sessions ([f4ed654](https://github.com/SourceRegistry/sveltekit-oidc/commit/f4ed654fe4a61616025795970aa375dea3fdf1a7))
+
 ## [2.0.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v2.0.0...v2.0.1) (2026-07-20)
 
 
