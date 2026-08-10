@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v2.0.2...v2.1.0) (2026-08-10)
+
+
+### Features
+
+* let beforeSessionPersist replace the persisted session ([9d3c8ac](https://github.com/SourceRegistry/sveltekit-oidc/commit/9d3c8acfe0466302379d533bfe2403cf81e0561f))
+
 ## [2.0.2](https://github.com/SourceRegistry/sveltekit-oidc/compare/v2.0.1...v2.0.2) (2026-07-22)
 
 
