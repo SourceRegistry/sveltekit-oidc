@@ -56,7 +56,8 @@ export const oidc = createOIDC<Identity, RequestData>({
 	}),
 
 	beforeSessionPersist: async ({session, reason}) => {
-		await synchronizeUser(session.identity, reason);
+		const identity = await synchronizeUser(session.identity, reason);
+		return {...session, identity};
 	},
 
 	loadRequestData: async ({session, event}) => ({
@@ -75,22 +76,29 @@ export const oidc = createOIDC<Identity, RequestData>({
 
 The extension points have deliberately literal names:
 
-| Extension point        | When it runs                                                    | Persisted               |
-| ---------------------- | --------------------------------------------------------------- | ----------------------- |
-| `resolveIdentity`      | After provider data is validated, on login and refresh          | Its result is persisted |
-| `beforeSessionPersist` | Immediately before a login or refreshed session is written      | Side effects only       |
-| `loadRequestData`      | Once while `handle` builds an authenticated request context     | Never                   |
-| `createPublicSession`  | When `getPublicSession` or `toPublicSession` projects a session | Never                   |
+| Extension point        | When it runs                                                     | Persisted                                       |
+| ----------------------- | ----------------------------------------------------------------- | ------------------------------------------------ |
+| `resolveIdentity`      | After provider data is validated, on login and refresh          | Its result is persisted                         |
+| `beforeSessionPersist` | Immediately before a login or refreshed session is written      | Returned session replaces it; `void` keeps it   |
+| `loadRequestData`      | Once while `handle` builds an authenticated request context     | Never                                            |
+| `createPublicSession`  | When `getPublicSession` or `toPublicSession` projects a session | Never                                            |
 
-Both login and refresh are explicit in the callback context:
+Both login and refresh are explicit in the callback context. Returning a session from
+`beforeSessionPersist` is what makes it the right place to provision or enrich application data —
+e.g. upserting a user row — before the very first session for that user is persisted:
 
 ```ts
 beforeSessionPersist: async ({session, reason}) => {
-	if (reason === 'login') {
-		await recordLogin(session.identity);
-	}
+	if (reason !== 'login') return;
+	const user = await upsertUser(session.identity);
+	return {...session, identity: {...session.identity, ...user}};
 };
 ```
+
+`resolveIdentity` runs first and may only be able to *read* application data (the user may not
+exist yet on a first login). `beforeSessionPersist` runs next, right before the write, so a session
+mutated or replaced there is the one every subsequent read of that session — including the result
+returned from `handleCallback`/`callbackHandler`'s `onsuccess` — actually sees.
 
 ## SvelteKit hook
 
@@ -159,6 +167,49 @@ The underlying operations are also available directly when a route needs custom 
 - `handleCallback(event)`
 - `logout(event, options)`
 - `handleBackChannelLogout(event)`
+
+### Request flow
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant login as loginHandler
+    participant callback as callbackHandler
+    participant logout as logoutHandler
+    participant bcl as backChannelLogoutHandler
+    participant OP as OpenID Provider
+
+    Browser->>login: GET /auth/login
+    login->>login: create PKCE pair, state, nonce
+    login-->>Browser: 302 redirect to OP authorize endpoint
+    Browser->>OP: authenticate
+    OP-->>Browser: 302 redirect with code & state
+
+    Browser->>callback: GET /auth/callback?code&state
+    callback->>OP: POST token endpoint (exchange code)
+    OP-->>callback: id_token, access_token, refresh_token
+    callback->>OP: verify id_token against JWKS
+    callback->>OP: GET userinfo endpoint (optional)
+    callback->>callback: resolveIdentity(idTokenClaims, userInfo)
+    callback->>callback: beforeSessionPersist(session, reason:'login')
+    Note over callback: a returned session here replaces<br/>what gets persisted and returned
+    callback->>callback: write session (cookie or sessionStore)
+    callback-->>Browser: onsuccess(event, result) or 302 redirect
+
+    Browser->>logout: POST /auth/logout
+    logout->>logout: clear persisted session
+    logout-->>Browser: 302 redirect to OP end_session endpoint or local page
+
+    OP->>bcl: POST /auth/backchannel-logout (logout_token)
+    bcl->>OP: verify logout_token against JWKS
+    bcl->>bcl: backChannelLogoutStore.revoke(sid/sub)
+    bcl-->>OP: 200 OK
+    Note over bcl: next getSession()/requireAuth() call<br/>for that sid/sub treats the session as revoked
+```
+
+`handle` (the SvelteKit hook) wraps every request outside of these four routes: it calls
+`getSession`, which transparently refreshes an expiring session — running `resolveIdentity` and
+`beforeSessionPersist` again with `reason: 'refresh'` — before exposing `event.locals.oidc`.
 - `getSession(event)`
 - `requireAuth(event)`
 - `clearSession(cookies)`

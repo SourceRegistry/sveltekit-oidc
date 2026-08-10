@@ -223,13 +223,19 @@ export type OIDCOptions<TIdentity extends OIDCUserClaims = OIDCUserClaims, TRequ
 		userInfo?: OIDCUserClaims;
 		reason: OIDCSessionReason;
 	}) => MaybePromise<TIdentity>;
-	/** Runs immediately before a login or refreshed session is persisted. */
+	/**
+	 * Runs immediately before a login or refreshed session is persisted.
+	 * Returning a session replaces the one that gets persisted and handed back to the
+	 * caller (`handleCallback`'s result, `getSession`'s result); returning `void` keeps it
+	 * unchanged. Use this to enrich or provision application data — e.g. upsert a user row —
+	 * before the session is written, rather than after via a route's own callback hook.
+	 */
 	beforeSessionPersist?: (context: {
 		session: OIDCSession<TIdentity>;
 		reason: OIDCSessionReason;
 		event?: MinimalRequestEvent;
 		tokenResponse: OIDCTokenResponse;
-	}) => MaybePromise<void>;
+	}) => MaybePromise<OIDCSession<TIdentity> | void>;
 	/**
 	 * Loads application-owned data once for each authenticated request handled by
 	 * `handle`. The result is exposed as `event.locals.oidc.data` and is never

@@ -518,19 +518,20 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 tokens: normalizeTokens(tokenResponse, defaultScope, session.tokens),
                 refreshedAt: Math.floor(Date.now() / 1000)
             };
-            await options.beforeSessionPersist?.({
-                session: nextSession,
-                reason: 'refresh',
-                event,
-                tokenResponse
-            });
-            await writePersistedSession(cookies, nextSession, persisted?.id);
+            const persistedSession =
+                (await options.beforeSessionPersist?.({
+                    session: nextSession,
+                    reason: 'refresh',
+                    event,
+                    tokenResponse
+                })) ?? nextSession;
+            await writePersistedSession(cookies, persistedSession, persisted?.id);
             log.debug('OIDC session tokens refreshed', {
-                expiresAt: nextSession.tokens.expiresAt,
-                refreshExpiresAt: nextSession.tokens.refreshExpiresAt,
-                hasRefreshToken: Boolean(nextSession.tokens.refreshToken)
+                expiresAt: persistedSession.tokens.expiresAt,
+                refreshExpiresAt: persistedSession.tokens.refreshExpiresAt,
+                hasRefreshToken: Boolean(persistedSession.tokens.refreshToken)
             });
-            return nextSession;
+            return persistedSession;
         } catch (err) {
             log.error('Token refresh failed — clearing session', err);
             await clearPersistedSession(cookies, persisted?.id);
@@ -648,17 +649,18 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             createdAt: now,
             refreshedAt: now
         };
-        await options.beforeSessionPersist?.({
-            session,
-            reason: 'login',
-            event: event as MinimalRequestEvent,
-            tokenResponse
-        });
+        const persistedSession =
+            (await options.beforeSessionPersist?.({
+                session,
+                reason: 'login',
+                event: event as MinimalRequestEvent,
+                tokenResponse
+            })) ?? session;
         const existingSession = stateCookie.prompt === 'none' ? await readPersistedSession(event.cookies) : null;
-        await writePersistedSession(event.cookies, session, existingSession?.id);
+        await writePersistedSession(event.cookies, persistedSession, existingSession?.id);
 
         return {
-            session,
+            session: persistedSession,
             returnTo: stateCookie.returnTo
         };
     }
