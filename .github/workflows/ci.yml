@@ -37,7 +37,9 @@ jobs:
         run: npm install --prefix example
       - name: Pack the local package
         id: package
-        run: echo "tarball=$(npm pack --pack-destination example --silent)" >> "$GITHUB_OUTPUT"
+        run: |
+          tarball=$(npm pack --pack-destination example --silent | tail -n 1)
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
       - name: Install the local package artifact in the example
         run: npm install --prefix example --no-save --package-lock=false "./example/${{ steps.package.outputs.tarball }}"
       - name: Check the example
