@@ -1,3 +1,29 @@
+# [3.0.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v2.1.0...v3.0.0) (2026-08-29)
+
+
+* fix!: enforce OIDC conformance and harden production edge cases ([3ec7836](https://github.com/SourceRegistry/sveltekit-oidc/commit/3ec783608d6acaf7a571e6d8c0315a64c08e6a26))
+
+
+### Bug Fixes
+
+* provide dummy OIDC config env vars for the example build ([6a68064](https://github.com/SourceRegistry/sveltekit-oidc/commit/6a68064764932cb115f633c6d7a34fba3a5bc8fc))
+* strip npm pack lifecycle output before writing GITHUB_OUTPUT ([61daa90](https://github.com/SourceRegistry/sveltekit-oidc/commit/61daa9099b5b7d7d3a542ff46f32c6af9e436868))
+
+
+### BREAKING CHANGES
+
+* `cookieSecret` must now be at least 32 bytes; shorter
+secrets throw at startup. Discovery/token/JWKS endpoints must be HTTPS
+unless `allowInsecureHttp: true` is set. Refreshed ID tokens are now
+rejected if `sub`/`aud`/`iss` change from the original session instead
+of silently replacing the identity. The client `idleRedirectMode` option
+is renamed to `redirectOnIdle`. `OIDCCookies.readState`/`clearState` gain
+an optional `stateToken` parameter for per-transaction state cookies;
+custom `OIDCCookies` implementations should accept it.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BAGVbb6K7H79nkf7cUoL91
+
 # [2.1.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v2.0.2...v2.1.0) (2026-08-10)
 
 
