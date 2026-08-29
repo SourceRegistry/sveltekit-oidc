@@ -45,6 +45,13 @@ jobs:
       - name: Check the example
         run: npm --prefix example run check
       - name: Build the example
+        # Prerendering executes the example's server config module, so it needs
+        # config present even though nothing here makes a real network call.
+        env:
+          PUBLIC_OIDC_ISSUER: https://issuer.ci.invalid
+          PUBLIC_OIDC_CLIENT_ID: ci-client
+          SECRET_OIDC_CLIENT_SECRET: ci-client-secret
+          SECRET_OIDC_COOKIE_SECRET: ci-dummy-cookie-secret-32-bytes-min!!
         run: npm --prefix example run build
 
   release:
