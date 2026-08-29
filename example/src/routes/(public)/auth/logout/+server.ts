@@ -1,3 +1,3 @@
-import {oidc} from "$lib/server/configurations/oidc.configuration";
+import {oidc} from '$lib/server/configurations/oidc.configuration';
 
-export const GET = oidc.logoutHandler()
+export const POST = oidc.logoutHandler();

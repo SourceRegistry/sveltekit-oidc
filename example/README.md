@@ -1,42 +1,23 @@
-# sv
+# sveltekit-oidc example
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+This application demonstrates the current v2 API. CI installs the package produced by the parent
+checkout before checking and building the application, so it also serves as a package-consumer test.
 
-## Creating a project
+Configure at least:
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
+```env
+PUBLIC_OIDC_ISSUER=http://localhost:8080/realms/example
+PUBLIC_OIDC_CLIENT_ID=sveltekit-example
+SECRET_OIDC_CLIENT_SECRET=replace-me
+SECRET_OIDC_COOKIE_SECRET=replace-with-at-least-32-random-bytes
 ```
 
-To recreate this project with the same configuration:
+Generate a cookie secret and start the application:
 
 ```sh
-# recreate this project
-npx sv@0.14.1 create --template minimal --types ts --install npm ./
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+npm run generate:cookieSecret
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+The example enables insecure HTTP and a non-secure cookie for local development. Production applications should use the HTTPS and secure-cookie defaults.

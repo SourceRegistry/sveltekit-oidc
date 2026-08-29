@@ -1,74 +1,72 @@
-import { error } from '@sveltejs/kit';
-import { randomBytes } from 'node:crypto';
-import { sign } from '@sourceregistry/node-jwt/promises';
+import {error} from '@sveltejs/kit';
+import {randomBytes} from 'node:crypto';
+import {sign} from '@sourceregistry/node-jwt/promises';
 
-import type {
-	OIDCClientAssertionOptions,
-	OIDCClientSecretJwtOptions,
-	OIDCPrivateKeyJwtOptions
-} from './types.js';
-import { base64UrlEncode } from './utils.js';
+import type {OIDCClientAssertionOptions, OIDCClientSecretJwtOptions, OIDCPrivateKeyJwtOptions} from './types.js';
+import {base64UrlEncode} from './utils.js';
 
-export async function fetchJson<T>(
-	url: string,
-	init?: RequestInit,
-	fetchImpl: typeof fetch = fetch
-): Promise<T> {
-	const response = await fetchImpl(url, init);
-	if (!response.ok) {
-		const body = await response.text().catch(() => '');
-		throw error(response.status, {
-			message: `OIDC request failed for '${url}' with status ${response.status}: ${body}`
-		});
-	}
+export async function fetchJson<T>(url: string, init?: RequestInit, fetchImpl: typeof fetch = fetch): Promise<T> {
+    const response = await fetchImpl(url, init);
+    if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw error(response.status, {
+            message: `OIDC request failed for '${url}' with status ${response.status}: ${body}`
+        });
+    }
 
-	return (await response.json()) as T;
+    return (await response.json()) as T;
 }
 
 export function asAuthorizationHeader(clientId: string, clientSecret: string) {
-	return `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+    const encode = (value: string) => {
+        const encoded = new URLSearchParams({value}).toString();
+        return encoded.slice('value='.length);
+    };
+    return `Basic ${Buffer.from(`${encode(clientId)}:${encode(clientSecret)}`).toString('base64')}`;
 }
 
-export async function createClientSecretJwtAssertion(
-	options: OIDCClientAssertionOptions & OIDCClientSecretJwtOptions
-) {
-	if (!options.clientSecret) {
-		throw error(500, { message: 'clientSecret is required for client_secret_jwt' });
-	}
+export async function createClientSecretJwtAssertion(options: OIDCClientAssertionOptions & OIDCClientSecretJwtOptions) {
+    if (!options.clientSecret) {
+        throw error(500, {
+            message: 'clientSecret is required for client_secret_jwt'
+        });
+    }
 
-	const algorithm = options.algorithm ?? 'HS256';
-	const now = Math.floor(Date.now() / 1000);
+    const algorithm = options.algorithm ?? 'HS256';
+    const now = Math.floor(Date.now() / 1000);
 
-	return sign(
-		{
-			iss: options.clientId,
-			sub: options.clientId,
-			aud: options.tokenEndpoint,
-			jti: base64UrlEncode(randomBytes(24)),
-			iat: now,
-			exp: now + (options.expiresInSeconds ?? 60)
-		},
-		options.clientSecret,
-		{ alg: algorithm, typ: 'JWT' }
-	);
+    return sign(
+        {
+            iss: options.clientId,
+            sub: options.clientId,
+            aud: options.tokenEndpoint,
+            jti: base64UrlEncode(randomBytes(24)),
+            iat: now,
+            exp: now + (options.expiresInSeconds ?? 60)
+        },
+        options.clientSecret,
+        {alg: algorithm, typ: 'JWT'}
+    );
 }
 
-export async function createPrivateKeyJwtAssertion(
-	options: OIDCClientAssertionOptions & OIDCPrivateKeyJwtOptions
-) {
-	const algorithm = options.algorithm ?? 'RS256';
-	const now = Math.floor(Date.now() / 1000);
+export async function createPrivateKeyJwtAssertion(options: OIDCClientAssertionOptions & OIDCPrivateKeyJwtOptions) {
+    const algorithm = options.algorithm ?? 'RS256';
+    const now = Math.floor(Date.now() / 1000);
 
-	return sign(
-		{
-			iss: options.clientId,
-			sub: options.clientId,
-			aud: options.tokenEndpoint,
-			jti: base64UrlEncode(randomBytes(24)),
-			iat: now,
-			exp: now + (options.expiresInSeconds ?? 60)
-		},
-		options.privateKey,
-		{ alg: algorithm, typ: 'JWT', ...(options.keyId ? { kid: options.keyId } : {}) }
-	);
+    return sign(
+        {
+            iss: options.clientId,
+            sub: options.clientId,
+            aud: options.tokenEndpoint,
+            jti: base64UrlEncode(randomBytes(24)),
+            iat: now,
+            exp: now + (options.expiresInSeconds ?? 60)
+        },
+        options.privateKey,
+        {
+            alg: algorithm,
+            typ: 'JWT',
+            ...(options.keyId ? {kid: options.keyId} : {})
+        }
+    );
 }

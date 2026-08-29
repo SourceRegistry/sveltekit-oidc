@@ -27,10 +27,23 @@ jobs:
           registry-url: "https://registry.npmjs.org/"
       - name: Install dependencies
         run: npm install
+      - name: Check types and Svelte components
+        run: npm run check
       - name: Run tests
         run: npm test
       - name: Build the package
         run: npm run build
+      - name: Install example dependencies
+        run: npm install --prefix example
+      - name: Pack the local package
+        id: package
+        run: echo "tarball=$(npm pack --pack-destination example --silent)" >> "$GITHUB_OUTPUT"
+      - name: Install the local package artifact in the example
+        run: npm install --prefix example --no-save --package-lock=false "./example/${{ steps.package.outputs.tarball }}"
+      - name: Check the example
+        run: npm --prefix example run check
+      - name: Build the example
+        run: npm --prefix example run build
 
   release:
     name: Release

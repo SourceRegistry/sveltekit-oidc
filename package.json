@@ -84,7 +84,7 @@
     "oauth"
   ],
   "dependencies": {
-    "@sourceregistry/node-jwt": "^1.5.11"
+    "@sourceregistry/node-jwt": "^1.6.0"
   },
   "release": {
     "branches": [

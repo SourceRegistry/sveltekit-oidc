@@ -11,9 +11,10 @@
     import type {Snippet} from 'svelte';
 
     import {setOIDCContext} from './context.js';
+	import {getIdlePhase, normalizeIdleDuration} from './idle.js';
     import {classifySessionMonitorEvent} from './session-monitor.js';
 
-    type RedirectMode = 'login' | 'logout' | 'reload' | 'none';
+	type RedirectMode = 'login' | 'logout' | 'provider-logout' | 'reload' | 'none';
 
     type OIDCClientDebugEvent = {
         type: string;
@@ -32,6 +33,14 @@
         redirectOnExpired = 'login',
         redirectOnRevoked = 'login',
         redirectIfUnauthenticated = false,
+        idleTimeoutMs = 0,
+		redirectOnIdle = 'provider-logout',
+        idleEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'wheel'],
+        idleActivityThrottleMs = 1000,
+        idleWarningMs = 0,
+        idleWarning,
+        heartbeatUrl,
+        heartbeatIntervalMs = 60_000,
         onDebug,
         children
     }: {
@@ -46,6 +55,30 @@
         redirectOnExpired?: RedirectMode;
         redirectOnRevoked?: RedirectMode;
         redirectIfUnauthenticated?: boolean;
+        /** Milliseconds of no user activity before forcing redirectOnIdle. 0 disables idle tracking. */
+        idleTimeoutMs?: number;
+        redirectOnIdle?: RedirectMode;
+        /** window events treated as activity; reset the idle timer, throttled by idleActivityThrottleMs. */
+        idleEvents?: string[];
+        idleActivityThrottleMs?: number;
+        /**
+         * How long before idleTimeoutMs to show idleWarning instead of redirecting immediately.
+         * 0 (default) skips the warning and redirects at idleTimeoutMs, same as before.
+         * Must be less than idleTimeoutMs.
+         */
+        idleWarningMs?: number;
+        /** Rendered while the idle warning is active. Passed secondsRemaining plus stayLoggedIn/logout callbacks. */
+        idleWarning?: Snippet<[{secondsRemaining: number; stayLoggedIn: () => void; logout: () => void}]>;
+        /**
+         * Server endpoint touched on activity to reset the *server-side* idle timer
+         * (e.g. the identity service's session_idle_timeout). Undefined disables this —
+         * revalidate()/stayLoggedIn() alone only reach the server when the access token
+         * is near expiry, so without this the server session can idle out independently
+         * of what this component shows.
+         */
+        heartbeatUrl?: string;
+        /** Minimum gap between heartbeat requests while active. Match the server's own touch throttle. */
+        heartbeatIntervalMs?: number;
         /** Receives token-safe lifecycle events for diagnosing session changes. */
         onDebug?: (event: OIDCClientDebugEvent) => void;
         children?: Snippet;
@@ -58,9 +91,13 @@
     let status = $state<'authenticated' | 'unauthenticated' | 'expired' | 'revoked'>('unauthenticated');
     let revalidating = $state(false);
     let handledUnauthenticated = $state(false);
+    let idleWarningVisible = $state(false);
+    let idleSecondsRemaining = $state(0);
+    let idleStayLoggedIn = () => {};
+    let idleLogoutNow = () => {};
     let sessionExpiredDuringRevalidation = false;
 
-    function debug(type: string, details?: Record<string, unknown>) {
+    function debug(type: string, details: Record<string, unknown> | undefined = undefined) {
         onDebug?.({type, details});
     }
 
@@ -73,6 +110,11 @@
     const canMonitorIframe = $derived(
         Boolean(monitorSession && session?.isAuthenticated && session?.sessionState && iframeUrl)
     );
+	const effectiveIdleTimeoutMs = $derived(normalizeIdleDuration(idleTimeoutMs));
+	const effectiveIdleWarningMs = $derived(normalizeIdleDuration(idleWarningMs));
+	const effectiveIdleActivityThrottleMs = $derived(normalizeIdleDuration(idleActivityThrottleMs, 1000));
+	const effectiveHeartbeatIntervalMs = $derived(normalizeIdleDuration(heartbeatIntervalMs, 60_000));
+	const idleActivityStorageKey = $derived(`sveltekit-oidc:activity:${config.issuer}:${config.clientId}`);
 
     const context = setOIDCContext<TIdentity>({
         get isAuthenticated() {
@@ -99,7 +141,7 @@
         get revalidating() {
             return revalidating;
         },
-        login: (returnTo?: string) => login(returnTo),
+        login: (returnTo: string | undefined = undefined) => login(returnTo),
         logout,
         revalidate
     });
@@ -118,7 +160,7 @@
 
     function buildLoginUrl(
         returnTo = `${window.location.pathname}${window.location.search}`,
-        prompt?: 'none'
+        prompt: 'none' | undefined = undefined
     ) {
         const url = new URL(resolvedLoginPath, window.location.href);
         url.searchParams.set('returnTo', returnTo);
@@ -153,7 +195,24 @@
         form.submit();
     }
 
-    function login(returnTo?: string) {
+	async function sendHeartbeat(): Promise<boolean> {
+		if (!heartbeatUrl) return true;
+        try {
+            const response = await fetch(heartbeatUrl, {method: 'POST', credentials: 'same-origin'});
+            if (!response.ok) {
+                debug('heartbeat_failed', {status: response.status});
+				if (response.status === 401 || response.status === 403) void handleRedirect('logout');
+				return false;
+            }
+            debug('heartbeat_sent');
+			return true;
+        } catch (err) {
+            debug('heartbeat_failed', {error: err instanceof Error ? err.message : String(err)});
+			return false;
+        }
+    }
+
+    function login(returnTo: string | undefined = undefined) {
         debug('login_redirect_requested', {returnTo: returnTo ?? `${window.location.pathname}${window.location.search}`});
         // loginPath is a plain +server.ts redirect endpoint, not a routable
         // page — use a full browser navigation, not SvelteKit's goto().
@@ -209,6 +268,10 @@
             window.location.reload();
             return;
         }
+		if (mode === 'provider-logout') {
+			await logout(false);
+			return;
+		}
 
         login();
     }
@@ -332,6 +395,147 @@
     });
 
     $effect(() => {
+        if (!heartbeatUrl || !session?.isAuthenticated) {
+            return;
+        }
+
+        let lastHeartbeatAt = 0;
+		let heartbeatInFlight = false;
+
+        function onActivity() {
+            const now = Date.now();
+			if (heartbeatInFlight || now - lastHeartbeatAt < effectiveHeartbeatIntervalMs) return;
+            lastHeartbeatAt = now;
+			heartbeatInFlight = true;
+			void sendHeartbeat().finally(() => {
+				heartbeatInFlight = false;
+			});
+        }
+
+        for (const eventName of idleEvents) {
+            window.addEventListener(eventName, onActivity, {passive: true});
+        }
+
+        return () => {
+            for (const eventName of idleEvents) {
+                window.removeEventListener(eventName, onActivity);
+            }
+        };
+    });
+
+    $effect(() => {
+		if (!effectiveIdleTimeoutMs || !session?.isAuthenticated) {
+            idleWarningVisible = false;
+            return;
+        }
+
+		let timer: number | undefined;
+		let lastActivityAt = Date.now();
+		let lastLocalActivityAt = 0;
+		let logoutTriggered = false;
+		try {
+			const sharedActivity = Number(window.localStorage.getItem(idleActivityStorageKey));
+			if (Number.isFinite(sharedActivity)) lastActivityAt = Math.max(lastActivityAt, sharedActivity);
+		} catch {
+			// Storage can be denied in privacy modes; per-tab idle tracking still works.
+		}
+
+		function shareActivity(timestamp: number) {
+			try {
+				window.localStorage.setItem(idleActivityStorageKey, String(timestamp));
+			} catch {
+				// See storage-read fallback above.
+			}
+		}
+
+		function schedule() {
+			if (timer) window.clearTimeout(timer);
+			const phase = getIdlePhase(
+				lastActivityAt,
+				Date.now(),
+				effectiveIdleTimeoutMs,
+				effectiveIdleWarningMs
+			);
+			idleSecondsRemaining = phase.secondsRemaining;
+			if (phase.phase === 'idle') {
+				if (!logoutTriggered) {
+					logoutTriggered = true;
+					idleWarningVisible = false;
+					debug('idle_timeout_reached', {idleTimeoutMs: effectiveIdleTimeoutMs});
+					void handleRedirect(redirectOnIdle);
+				}
+				return;
+			}
+			if (phase.phase === 'warning' && !idleWarningVisible) {
+				idleWarningVisible = true;
+				debug('idle_warning_shown', {idleWarningMs: effectiveIdleWarningMs});
+			} else if (phase.phase === 'active') {
+				idleWarningVisible = false;
+			}
+			const untilTransition = Math.max(1, (phase.nextTransitionAt ?? Date.now() + 1000) - Date.now());
+			timer = window.setTimeout(schedule, phase.phase === 'warning' ? Math.min(1000, untilTransition) : untilTransition);
+		}
+
+        function onActivity() {
+            // Once the warning is up, passive activity (e.g. moving the mouse while
+            // reading the modal) must not silently dismiss it — only an explicit
+            // stayLoggedIn() response should reset the timer.
+            if (idleWarningVisible) return;
+            const now = Date.now();
+			if (now - lastLocalActivityAt < effectiveIdleActivityThrottleMs) return;
+			lastLocalActivityAt = now;
+            lastActivityAt = now;
+			shareActivity(now);
+			schedule();
+        }
+
+		function onSharedActivity(event: StorageEvent) {
+			if (event.key !== idleActivityStorageKey) return;
+			const timestamp = Number(event.newValue);
+			if (!Number.isFinite(timestamp) || timestamp <= lastActivityAt) return;
+			lastActivityAt = timestamp;
+			logoutTriggered = false;
+			schedule();
+		}
+
+		idleStayLoggedIn = () => {
+            debug('idle_warning_dismissed_stay_logged_in');
+			void (async () => {
+				if (!(await sendHeartbeat())) return;
+				await revalidate();
+				await tick();
+				if (!session?.isAuthenticated) return;
+				lastActivityAt = Date.now();
+				logoutTriggered = false;
+				shareActivity(lastActivityAt);
+				schedule();
+			})();
+        };
+        idleLogoutNow = () => {
+			if (timer) window.clearTimeout(timer);
+            idleWarningVisible = false;
+            void logout();
+        };
+
+		shareActivity(lastActivityAt);
+		schedule();
+        for (const eventName of idleEvents) {
+            window.addEventListener(eventName, onActivity, {passive: true});
+        }
+		window.addEventListener('storage', onSharedActivity);
+		document.addEventListener('visibilitychange', schedule);
+
+        return () => {
+			if (timer) window.clearTimeout(timer);
+            for (const eventName of idleEvents) {
+                window.removeEventListener(eventName, onActivity);
+            }
+			window.removeEventListener('storage', onSharedActivity);
+			document.removeEventListener('visibilitychange', schedule);
+        };
+    });
+
+    $effect(() => {
         if (session?.isAuthenticated) {
             handledUnauthenticated = false;
             return;
@@ -402,6 +606,14 @@
             hidden
             aria-hidden="true"
     ></iframe>
+{/if}
+
+{#if idleWarningVisible && idleWarning}
+    {@render idleWarning({
+        secondsRemaining: idleSecondsRemaining,
+        stayLoggedIn: () => idleStayLoggedIn(),
+        logout: () => idleLogoutNow()
+    })}
 {/if}
 
 {@render children?.()}

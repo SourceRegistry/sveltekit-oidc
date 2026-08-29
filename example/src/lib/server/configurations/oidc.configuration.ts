@@ -1,28 +1,29 @@
-import { OpenIDConnect } from "@sourceregistry/sveltekit-oidc/server";
-import {env as $public} from "$env/dynamic/public";
-import {env as $private} from "$env/dynamic/private";
+import {createOIDC} from '@sourceregistry/sveltekit-oidc/server';
+import {env as $public} from '$env/dynamic/public';
+import {env as $private} from '$env/dynamic/private';
 
-export const oidc = OpenIDConnect({
+type AppIdentity = {
+    sub: string;
+    email?: string;
+    name?: string;
+    roles: string[];
+};
+
+export const oidc = createOIDC<AppIdentity>({
     issuer: $public['PUBLIC_OIDC_ISSUER']!,
     clientId: $public['PUBLIC_OIDC_CLIENT_ID']!,
     clientSecret: $private['SECRET_OIDC_CLIENT_SECRET']!,
     cookieSecret: $private['SECRET_OIDC_COOKIE_SECRET']!,
     clockSkewSeconds: 30,
     sessionStore: 'memory',
+    allowInsecureHttp: true, // Local development only; omit this in production.
     cookieOptions: {
-        secure: false,
+        secure: false
     },
-    // Project provider-specific claims into a typed shape. TClaims is inferred
-    // from this return type and threaded through the session, locals, and client context.
-    transformClaims: (claims) => ({
-        ...claims,
-        roles: (claims.roles as string[] | undefined) ?? [],
-    }),
-    // Project the session into a typed shape with app-specific data.
-    // TSession is inferred from this return type and threaded through the
-    // session store, locals, and requireAuth/handleCallback results.
-    transformSession: (session) => ({
-        ...session,
-        permissions: session.user?.roles ?? [],
-    }),
+    resolveIdentity: ({idTokenClaims, userInfo}) => ({
+        sub: idTokenClaims.sub,
+        email: (userInfo?.email ?? idTokenClaims.email) as string | undefined,
+        name: (userInfo?.name ?? idTokenClaims.name) as string | undefined,
+        roles: ((userInfo?.roles ?? idTokenClaims.roles) as string[] | undefined) ?? []
+    })
 });
