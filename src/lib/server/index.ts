@@ -153,7 +153,51 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
 
     let metadataPromise: Promise<OIDCDiscoveryDocument> | undefined;
     let jwksPromise: Promise<JWKSResolver> | undefined;
+    let cachedMetadata: OIDCDiscoveryDocument | undefined;
+    let metadataFetchedAt = 0;
+    let metadataNextRefreshAttemptAt = 0;
+    let metadataRefreshInFlight: Promise<void> | undefined;
     const configuredIssuer = options.issuer ? normalizeIssuer(options.issuer) : undefined;
+    const discoveryRetryAttempts = Math.max(1, options.discoveryRetry?.attempts ?? 5);
+    const discoveryRetryInitialDelayMs = Math.max(0, options.discoveryRetry?.initialDelayMs ?? 500);
+    const discoveryRetryMaxDelayMs = Math.max(
+        discoveryRetryInitialDelayMs,
+        options.discoveryRetry?.maxDelayMs ?? 5000
+    );
+    const metadataRefreshIntervalMs = Math.max(0, options.metadataRefreshIntervalSeconds ?? 3600) * 1000;
+
+    function isTransientDiscoveryError(err: unknown): boolean {
+        const status = (err as {status?: number} | null | undefined)?.status;
+        // No status means the request never reached the provider (e.g. connection
+        // refused/reset, DNS failure) - typical while an identity provider is starting up.
+        if (status === undefined) return true;
+        return status === 429 || (status >= 500 && status <= 599);
+    }
+
+    function delay(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function fetchDiscoveryDocumentWithRetry(discoveryUrl: string): Promise<OIDCDiscoveryDocument> {
+        let attempt = 0;
+        let delayMs = discoveryRetryInitialDelayMs;
+        for (;;) {
+            try {
+                return await fetchJson<OIDCDiscoveryDocument>(discoveryUrl, undefined, fetchImpl);
+            } catch (err) {
+                attempt++;
+                if (!isTransientDiscoveryError(err) || attempt >= discoveryRetryAttempts) {
+                    throw err;
+                }
+                log.warn(
+                    `OIDC discovery fetch for '${discoveryUrl}' failed (attempt ${attempt}/${discoveryRetryAttempts}); retrying in ${delayMs}ms`,
+                    err
+                );
+                await delay(delayMs);
+                delayMs = Math.min(delayMs * 2, discoveryRetryMaxDelayMs);
+            }
+        }
+    }
 
     function validateProtocolUrl(name: string, value: string, issuer = false) {
         let url: URL;
@@ -259,44 +303,77 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         cookieStore.clearSessionReference(cookies);
     }
 
-    async function getMetadata() {
-        if (!metadataPromise) {
-            metadataPromise = (async () => {
-                if (options.endpoints?.authorization_endpoint && options.endpoints?.token_endpoint) {
-                    return validateMetadata(
-                        {
-                            jwks_uri: options.endpoints.jwks_uri ?? '',
-                            ...options.endpoints,
-                            issuer: configuredIssuer ?? normalizeIssuer(options.endpoints.issuer ?? '')
-                        } as OIDCDiscoveryDocument,
-                        configuredIssuer
-                    );
-                }
+    async function fetchMetadataDocument(): Promise<OIDCDiscoveryDocument> {
+        if (options.endpoints?.authorization_endpoint && options.endpoints?.token_endpoint) {
+            return validateMetadata(
+                {
+                    jwks_uri: options.endpoints.jwks_uri ?? '',
+                    ...options.endpoints,
+                    issuer: configuredIssuer ?? normalizeIssuer(options.endpoints.issuer ?? '')
+                } as OIDCDiscoveryDocument,
+                configuredIssuer
+            );
+        }
 
-                const discoveryUrl =
-                    options.discoveryUrl ??
-                    (configuredIssuer ? `${configuredIssuer}/.well-known/openid-configuration` : undefined);
+        const discoveryUrl =
+            options.discoveryUrl ??
+            (configuredIssuer ? `${configuredIssuer}/.well-known/openid-configuration` : undefined);
 
-                if (!discoveryUrl) {
-                    throw error(500, {
-                        message: 'OIDC issuer or discoveryUrl must be configured'
-                    });
-                }
-
-                validateProtocolUrl('discoveryUrl', discoveryUrl);
-                const document = await fetchJson<OIDCDiscoveryDocument>(discoveryUrl, undefined, fetchImpl);
-                return validateMetadata(
-                    {
-                        ...document,
-                        ...options.endpoints,
-                        issuer: normalizeIssuer(document.issuer)
-                    },
-                    configuredIssuer
-                );
-            })().catch((err) => {
-                metadataPromise = undefined;
-                throw err;
+        if (!discoveryUrl) {
+            throw error(500, {
+                message: 'OIDC issuer or discoveryUrl must be configured'
             });
+        }
+
+        validateProtocolUrl('discoveryUrl', discoveryUrl);
+        const document = await fetchDiscoveryDocumentWithRetry(discoveryUrl);
+        return validateMetadata(
+            {
+                ...document,
+                ...options.endpoints,
+                issuer: normalizeIssuer(document.issuer)
+            },
+            configuredIssuer
+        );
+    }
+
+    function refreshMetadataInBackground(): void {
+        if (metadataRefreshInFlight || metadataRefreshIntervalMs <= 0) return;
+        const now = Date.now();
+        if (now - metadataFetchedAt < metadataRefreshIntervalMs) return;
+        if (now < metadataNextRefreshAttemptAt) return;
+
+        metadataRefreshInFlight = fetchMetadataDocument()
+            .then((document) => {
+                cachedMetadata = document;
+                metadataFetchedAt = Date.now();
+                metadataNextRefreshAttemptAt = 0;
+            })
+            .catch((err) => {
+                log.warn('OIDC background metadata refresh failed; continuing to use cached configuration', err);
+                metadataNextRefreshAttemptAt = Date.now() + discoveryRetryMaxDelayMs;
+            })
+            .finally(() => {
+                metadataRefreshInFlight = undefined;
+            });
+    }
+
+    async function getMetadata(): Promise<OIDCDiscoveryDocument> {
+        if (cachedMetadata) {
+            refreshMetadataInBackground();
+            return cachedMetadata;
+        }
+
+        if (!metadataPromise) {
+            metadataPromise = fetchMetadataDocument()
+                .then((document) => {
+                    cachedMetadata = document;
+                    metadataFetchedAt = Date.now();
+                    return document;
+                })
+                .finally(() => {
+                    metadataPromise = undefined;
+                });
         }
 
         return metadataPromise;

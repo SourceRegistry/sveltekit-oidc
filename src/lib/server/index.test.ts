@@ -152,6 +152,64 @@ describe('OIDC metadata validation', () => {
                 message: 'OIDC discovery issuer does not match the configured issuer'
             }
         });
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry a non-transient (4xx) discovery response', async () => {
+        const fetchImpl = vi.fn(async () => new Response('not found', {status: 404}));
+        const oidc = createOIDC({
+            issuer: 'https://identity.example',
+            clientId: 'client-app',
+            cookieSecret,
+            fetch: fetchImpl,
+            discoveryRetry: {attempts: 5, initialDelayMs: 5, maxDelayMs: 5}
+        });
+
+        await expect(oidc.getMetadata()).rejects.toMatchObject({status: 404});
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries a transient (503) discovery failure until the identity provider is ready, then caches the result', async () => {
+        const validDocument = {
+            issuer: 'https://identity.example',
+            authorization_endpoint: 'https://identity.example/authorize',
+            token_endpoint: 'https://identity.example/token',
+            jwks_uri: 'https://identity.example/jwks'
+        };
+        const fetchImpl = vi
+            .fn()
+            .mockResolvedValueOnce(new Response('starting up', {status: 503}))
+            .mockResolvedValueOnce(new Response('starting up', {status: 503}))
+            .mockResolvedValueOnce(new Response(JSON.stringify(validDocument)));
+        const oidc = createOIDC({
+            issuer: 'https://identity.example',
+            clientId: 'client-app',
+            cookieSecret,
+            fetch: fetchImpl,
+            discoveryRetry: {attempts: 5, initialDelayMs: 5, maxDelayMs: 5}
+        });
+
+        const metadata = await oidc.getMetadata();
+        expect(metadata.issuer).toBe('https://identity.example');
+        expect(fetchImpl).toHaveBeenCalledTimes(3);
+
+        // Cached document is reused on the next call; no additional fetch inside the refresh interval.
+        await oidc.getMetadata();
+        expect(fetchImpl).toHaveBeenCalledTimes(3);
+    });
+
+    it('gives up after the configured number of transient discovery failures', async () => {
+        const fetchImpl = vi.fn(async () => new Response('unavailable', {status: 503}));
+        const oidc = createOIDC({
+            issuer: 'https://identity.example',
+            clientId: 'client-app',
+            cookieSecret,
+            fetch: fetchImpl,
+            discoveryRetry: {attempts: 3, initialDelayMs: 5, maxDelayMs: 5}
+        });
+
+        await expect(oidc.getMetadata()).rejects.toMatchObject({status: 503});
+        expect(fetchImpl).toHaveBeenCalledTimes(3);
     });
 });
 

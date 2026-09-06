@@ -297,6 +297,29 @@ export type OIDCOptions<TIdentity extends OIDCUserClaims = OIDCUserClaims, TRequ
      * TLS verification in production.
      */
     fetch?: typeof fetch;
+    /**
+     * Controls retries for the initial (uncached) discovery document fetch,
+     * so a slow-starting identity provider — e.g. a 503 while it boots, or a
+     * connection error before its listener is up — doesn't fail every
+     * request until one happens to land after it's ready. Only network
+     * errors, 429, and 5xx responses are retried; 4xx responses and local
+     * validation failures (issuer mismatch, malformed URLs) fail immediately.
+     * Defaults to 5 attempts, starting at 500ms and doubling up to 5000ms.
+     */
+    discoveryRetry?: {
+        attempts?: number;
+        initialDelayMs?: number;
+        maxDelayMs?: number;
+    };
+    /**
+     * Once a discovery document has been fetched successfully, how often to
+     * refresh it in the background (stale-while-revalidate). The cached
+     * document keeps serving requests while a refresh is attempted or
+     * in-flight; a failed refresh is logged and retried after
+     * `discoveryRetry.maxDelayMs`, without disturbing the cache.
+     * Defaults to 3600 (1 hour). Set to 0 to disable background refresh.
+     */
+    metadataRefreshIntervalSeconds?: number;
 };
 
 export type OIDCLoginOptions = {
