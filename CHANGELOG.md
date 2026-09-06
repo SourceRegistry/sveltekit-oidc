@@ -1,3 +1,10 @@
+## [3.0.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v3.0.0...v3.0.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* retry OIDC discovery on transient failures and cache the result ([b2f1c18](https://github.com/SourceRegistry/sveltekit-oidc/commit/b2f1c18a9bd816dcbdcb8c12de2ad8ea9e3c6520))
+
 # [3.0.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v2.1.0...v3.0.0) (2026-08-29)
 
 
