@@ -235,15 +235,12 @@ export type OIDCOptions<TIdentity extends OIDCUserClaims = OIDCUserClaims, TRequ
      * the PKCE verifier, and the OIDC nonce across the redirect to the
      * provider and back. Defaults to 10 minutes.
      *
-     * If this expires (or the cookie is otherwise missing/mismatched, e.g.
-     * a second login started in another tab) before the browser returns
-     * from the provider, `handleCallback` restarts the login rather than
-     * failing outright - and the caller's original `returnTo` is *not*
-     * lost when that happens, since it also travels signed inside the
-     * `state` query parameter itself (see encodeOAuthState/decodeOAuthState
-     * in utils.ts), independent of this cookie's survival. Raising this
-     * value only reduces how often that restart happens; it is not
-     * required to fix a lost `returnTo`.
+     * If this expires or the browser drops it before the provider redirects
+     * back, `handleCallback` restarts login. The original `returnTo` survives
+     * because it also travels encrypted inside the `state` query parameter
+     * (see encodeOAuthState/decodeOAuthState in utils.ts). Each authorization
+     * transaction has its own cookie, so separate tabs do not overwrite one
+     * another's state.
      */
     stateMaxAgeSeconds?: number;
     defaultLoginRedirect?: string;

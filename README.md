@@ -27,30 +27,51 @@ declare it in the app's `package.json`:
 {"imports":{"#lib":"./src/lib/index.js","#lib/*":"./src/lib/*"}}
 ```
 
+The [API reference](https://sourceregistry.github.io/sveltekit-oidc/) lists every option and exported type.
+
 ## Configure
+
+Declare the server-only configuration variables required by SvelteKit 3:
+
+```ts
+// src/env.ts
+import {defineEnvVars} from '@sveltejs/kit/env';
+
+export const variables = defineEnvVars({
+    OIDC_ISSUER: {},
+    OIDC_CLIENT_ID: {},
+    OIDC_CLIENT_SECRET: {},
+    OIDC_COOKIE_SECRET: {}
+});
+```
+
+Set their values in your deployment environment. For local development, use an untracked `.env` file:
+
+```dotenv
+OIDC_ISSUER=https://identity.example.com
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
+OIDC_COOKIE_SECRET=replace-with-a-generated-secret
+```
 
 ```ts
 // src/lib/server/auth.ts
 import {createOIDC} from '@sourceregistry/sveltekit-oidc/server';
+import {OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_COOKIE_SECRET} from '$app/env/private';
 
 type Identity = {
     sub: string;
     email?: string;
     name?: string;
     roles: string[];
-    permissions?: string[];
 };
 
-type RequestData = {
-    permissions: string[];
-};
-
-export const oidc = createOIDC<Identity, RequestData>({
-    issuer: 'https://identity.example.com',
-    clientId: process.env.OIDC_CLIENT_ID!,
-    clientSecret: process.env.OIDC_CLIENT_SECRET!,
+export const oidc = createOIDC<Identity>({
+    issuer: OIDC_ISSUER,
+    clientId: OIDC_CLIENT_ID,
+    clientSecret: OIDC_CLIENT_SECRET,
     clientAuthMethod: 'client_secret_basic',
-    cookieSecret: process.env.OIDC_COOKIE_SECRET!,
+    cookieSecret: OIDC_COOKIE_SECRET,
     scope: ['openid', 'profile', 'email', 'offline_access'],
 
     resolveIdentity: ({idTokenClaims, userInfo}) => ({
@@ -60,28 +81,12 @@ export const oidc = createOIDC<Identity, RequestData>({
         roles: Array.isArray(userInfo?.roles ?? idTokenClaims.roles)
             ? ((userInfo?.roles ?? idTokenClaims.roles) as string[])
             : []
-    }),
-
-    beforeSessionPersist: async ({session, reason}) => {
-        const identity = await synchronizeUser(session.identity, reason);
-        return {...session, identity};
-    },
-
-    loadRequestData: async ({session, event}) => ({
-        permissions: await loadPermissions(session.sub!, event)
-    }),
-
-    createPublicSession: ({base, data}) => ({
-        ...base,
-        identity: {
-            ...base.identity,
-            permissions: data?.permissions ?? []
-        }
     })
 });
 ```
 
-`cookieSecret` must contain at least 32 bytes of entropy. For example:
+Replace the placeholder cookie secret before starting the app. `cookieSecret` must contain at least
+32 bytes of entropy. Generate one with:
 
 ```sh
 openssl rand -base64 32
@@ -101,6 +106,13 @@ trustedIdTokenAudiences: ['https://api.example.com']
 
 The client ID is always required in `aud`. `trustedIdTokenAudiences` permits only explicitly trusted
 additional audience values; it does not replace the client ID.
+
+Register an Authorization Code client with the provider. Allow the exact callback URL
+`https://your-app.example/auth/callback`; it must match the app origin and `redirectPath`.
+If you use provider logout, allow `https://your-app.example/` as a post-logout redirect, or
+configure and register the path passed as `postLogoutRedirectUri`. Request a provider-supported
+refresh-token scope such as `offline_access` if you need refresh tokens. Provider policies determine
+whether a refresh token is issued and whether it rotates.
 
 The extension points have deliberately literal names:
 
@@ -127,6 +139,10 @@ beforeSessionPersist: async ({session, reason}) => {
 exist yet on a first login). `beforeSessionPersist` runs next, right before the write, so a session
 mutated or replaced there is the one every subsequent read of that session — including the result
 returned from `handleCallback`/`callbackHandler`'s `onsuccess` — actually sees.
+
+Use `loadRequestData` for request-specific authorization data, then `createPublicSession` if the
+browser needs a safe subset of it. Neither callback is required for basic authentication. Never
+include access, refresh, or ID tokens in the public session.
 
 ## SvelteKit hook
 
@@ -189,6 +205,10 @@ import {oidc} from '#lib/server/auth.js';
 export const POST = oidc.backChannelLogoutHandler();
 ```
 
+The back-channel route is optional. To use it, configure `backChannelLogoutStore`, register its
+absolute URL with the provider, and ensure the provider advertises back-channel logout support.
+Use a shared store when the app runs on multiple instances.
+
 The underlying operations are also available directly when a route needs custom behavior:
 
 - `login(event, options)`
@@ -215,8 +235,9 @@ sequenceDiagram
 
     Browser->>callback: GET /auth/callback?code&state
     callback->>OP: POST token endpoint (exchange code)
-    OP-->>callback: id_token, access_token, refresh_token
-    callback->>OP: verify id_token against JWKS
+    OP-->>callback: id_token, access_token, optional refresh_token
+    callback->>OP: GET JWKS when needed
+    callback->>callback: verify id_token with JWKS
     callback->>OP: GET userinfo endpoint (optional)
     callback->>callback: resolveIdentity(idTokenClaims, userInfo)
     callback->>callback: beforeSessionPersist(session, reason:'login')
@@ -235,7 +256,7 @@ sequenceDiagram
     Note over bcl: next getSession()/requireAuth() call<br/>for that sid/sub treats the session as revoked
 ```
 
-`handle` (the SvelteKit hook) wraps every request outside of these four routes: it calls
+`handle` (the SvelteKit hook) runs for every request, including these routes. It calls
 `getSession`, which transparently refreshes an expiring session — running `resolveIdentity` and
 `beforeSessionPersist` again with `reason: 'refresh'` — before exposing `event.locals.oidc`.
 
@@ -277,7 +298,6 @@ returns. `getPublicSession(event)` is available when the hook has not already lo
 	config={data.sessionManagement}
 	idleTimeoutMs={30 * 60 * 1000}
 	idleWarningMs={60 * 1000}
-	heartbeatUrl="/auth/heartbeat"
 >
 	{@render children()}
 </OIDCContext>
@@ -301,13 +321,15 @@ Idle deadlines use absolute timestamps, synchronize activity across tabs, and re
 tab or device resumes from sleep. The default idle action performs provider logout; set
 `redirectOnIdle="logout"` only when clearing the application session without ending the OP
 session is intentional. `heartbeatUrl` is application-owned and should be a same-origin,
-CSRF-protected endpoint that returns `401` or `403` when the session is no longer valid.
+CSRF-protected endpoint that returns `401` or `403` when the session is no longer valid. Supply the
+prop only after creating that endpoint; the example above does not require one.
 
 When the OP iframe reports `changed`, the component first performs the Session Management 1.0
 `prompt=none` authorization check in a hidden iframe. The login handler supplies the current ID token
-as `id_token_hint`; a matching End-User refreshes the local session, while an OP error or a different
-End-User clears it. Applications using the standard `loginHandler()` and `callbackHandler()` routes do
-not need an additional endpoint.
+as `id_token_hint`; a matching End-User refreshes the local session. A definitive login failure or
+different End-User clears the matching local session. Temporary provider failures preserve it for
+retry, and a callback from an older login cannot replace a newer local session. Applications using
+the standard `loginHandler()` and `callbackHandler()` routes do not need an additional endpoint.
 
 ## Session stores
 
@@ -332,10 +354,12 @@ const sessionStore: OIDCSessionStore<Identity> = {
 Use a shared `backChannelLogoutStore` when back-channel logout must work across multiple instances.
 The built-in `'memory'` stores are intended for local development or single-process deployments.
 
-Providers that rotate refresh tokens also need a distributed `refreshLock` in multi-instance
-deployments. The built-in promise coalescing prevents duplicate refreshes within one process; the
-lock must serialize the supplied operation by session ID across every application instance. It also
-serializes session clearing with a refresh on another instance:
+For rotating refresh tokens in a multi-instance deployment, use **both** a shared `sessionStore`
+and a distributed `refreshLock`. The lock serializes refresh and logout by session ID across
+instances; after acquiring it, each instance rereads the shared store to find the current refresh
+token. The built-in promise coalescing prevents duplicate refreshes within one process. Cookie-only
+sessions cannot reliably coordinate a rotated refresh token across requests or instances because
+there is no shared current token to reread:
 
 ```ts
 const refreshLock = {
@@ -343,6 +367,9 @@ const refreshLock = {
         redlock.using([`oidc-refresh:${sessionId}`], 10_000, operation)
 };
 ```
+
+The lock's lease must remain valid for the complete token request and store write. Configure the
+lock implementation and its timeout for your provider's response times.
 
 ## Security behavior
 

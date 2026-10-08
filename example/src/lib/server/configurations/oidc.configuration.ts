@@ -16,6 +16,7 @@ export const oidc = createOIDC<AppIdentity>({
     cookieSecret: SECRET_OIDC_COOKIE_SECRET,
     clockSkewSeconds: 30,
     sessionStore: 'memory',
+    backChannelLogoutStore: 'memory',
     allowInsecureHttp: true, // Local development only; omit this in production.
     cookieOptions: {
         secure: false
