@@ -25,8 +25,14 @@ jobs:
         with:
           node-version: 24
           registry-url: "https://registry.npmjs.org/"
+      - name: Setup Deno for JSR module checks
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.3.7
       - name: Install dependencies
         run: npm install
+      - name: Check JSR module graph
+        run: npm run check:jsr
       - name: Check types and Svelte components
         run: npm run check
       - name: Run tests

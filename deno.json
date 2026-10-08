@@ -7,9 +7,13 @@
     "./server": "./src/lib/server/index.ts",
     "./client": "./src/lib/client/context.ts"
   },
+  "imports": {
+    "$app/server": "./src/lib/jsr-server-stub.ts"
+  },
   "publish": {
     "include": [
       "src/lib/jsr.ts",
+      "src/lib/jsr-server-stub.ts",
       "src/lib/server/**/*.ts",
       "src/lib/client/**/*.ts",
       "README.md",

@@ -10,6 +10,7 @@
     "prepare": "svelte-kit sync || echo ''",
     "prepack": "svelte-kit sync && svelte-package && publint",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:jsr": "node scripts/check-jsr-graph.mjs",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "test": "vitest run",
     "docs:build": "typedoc --options typedoc.json"
@@ -95,15 +96,15 @@
       "@semantic-release/commit-analyzer",
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
-      "@semantic-release/npm",
       "@sourceregistry/semantic-release-jsr",
+      "@semantic-release/npm",
       [
         "@semantic-release/git",
         {
           "assets": [
             "package.json",
             "package-lock.json",
-            "jsr.json",
+            "deno.json",
             "CHANGELOG.md"
           ],
           "message": "sveltekit-oidc(release): v${nextRelease.version}\n\n${nextRelease.notes}"
