@@ -9,9 +9,7 @@ export async function fetchJson<T>(url: string, init?: RequestInit, fetchImpl: t
     const response = await fetchImpl(url, init);
     if (!response.ok) {
         const body = await response.text().catch(() => '');
-        throw error(response.status, {
-            message: `OIDC request failed for '${url}' with status ${response.status}: ${body}`
-        });
+        throw error(response.status, `OIDC request failed for '${url}' with status ${response.status}: ${body}`);
     }
 
     return (await response.json()) as T;
@@ -27,9 +25,7 @@ export function asAuthorizationHeader(clientId: string, clientSecret: string) {
 
 export async function createClientSecretJwtAssertion(options: OIDCClientAssertionOptions & OIDCClientSecretJwtOptions) {
     if (!options.clientSecret) {
-        throw error(500, {
-            message: 'clientSecret is required for client_secret_jwt'
-        });
+        throw error(500, 'clientSecret is required for client_secret_jwt');
     }
 
     const algorithm = options.algorithm ?? 'HS256';
@@ -70,3 +66,4 @@ export async function createPrivateKeyJwtAssertion(options: OIDCClientAssertionO
         }
     );
 }
+import '$app/server';

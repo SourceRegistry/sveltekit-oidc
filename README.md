@@ -20,6 +20,13 @@ It implements the protocol itself and does not depend on `openid-client`.
 npm install @sourceregistry/sveltekit-oidc
 ```
 
+Requires SvelteKit 3 and Svelte 5. If your app uses `#lib` as in the examples below,
+declare it in the app's `package.json`:
+
+```json
+{"imports":{"#lib":"./src/lib/index.js","#lib/*":"./src/lib/*"}}
+```
+
 ## Configure
 
 ```ts
@@ -125,7 +132,7 @@ returned from `handleCallback`/`callbackHandler`'s `onsuccess` — actually sees
 
 ```ts
 // src/hooks.server.ts
-import {oidc} from '$lib/server/auth';
+import {oidc} from '#lib/server/auth.js';
 
 export const handle = oidc.handle;
 ```
@@ -143,7 +150,7 @@ Type the locals directly from the configured instance:
 ```ts
 // src/app.d.ts
 import type {OIDCLocals} from '@sourceregistry/sveltekit-oidc/server';
-import type {oidc} from '$lib/server/auth';
+import type {oidc} from '#lib/server/auth.js';
 
 declare global {
     namespace App {
@@ -160,25 +167,25 @@ export {};
 
 ```ts
 // src/routes/auth/login/+server.ts
-import {oidc} from '$lib/server/auth';
+import {oidc} from '#lib/server/auth.js';
 export const GET = oidc.loginHandler();
 ```
 
 ```ts
 // src/routes/auth/callback/+server.ts
-import {oidc} from '$lib/server/auth';
+import {oidc} from '#lib/server/auth.js';
 export const GET = oidc.callbackHandler();
 ```
 
 ```ts
 // src/routes/auth/logout/+server.ts
-import {oidc} from '$lib/server/auth';
+import {oidc} from '#lib/server/auth.js';
 export const POST = oidc.logoutHandler();
 ```
 
 ```ts
 // src/routes/auth/backchannel-logout/+server.ts
-import {oidc} from '$lib/server/auth';
+import {oidc} from '#lib/server/auth.js';
 export const POST = oidc.backChannelLogoutHandler();
 ```
 
@@ -242,7 +249,7 @@ Load a token-free session for the browser:
 
 ```ts
 // src/routes/+layout.server.ts
-import {oidc} from '$lib/server/auth';
+import {oidc} from '#lib/server/auth.js';
 
 export async function load(event) {
     return {

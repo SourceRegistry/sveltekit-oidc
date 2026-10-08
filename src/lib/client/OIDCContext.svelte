@@ -6,7 +6,7 @@
 </script>
 
 <script lang="ts" generics="TIdentity extends OIDCUserClaims = OIDCUserClaims">
-    import {beforeNavigate, invalidate, invalidateAll} from '$app/navigation';
+    import {beforeNavigate, invalidate, refreshAll} from '$app/navigation';
     import {onDestroy, tick} from 'svelte';
     import type {Snippet} from 'svelte';
 
@@ -240,7 +240,7 @@
                 await invalidate(session.revalidationDependency);
             } else {
                 debug('revalidation_fallback_invalidated_all');
-                await invalidateAll();
+                await refreshAll();
             }
         } finally {
             revalidating = false;

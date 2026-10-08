@@ -46,3 +46,4 @@ export function isSessionExpired<TClaims extends OIDCUserClaims = OIDCUserClaims
 		session.tokens.expiresAt !== undefined &&
 		session.tokens.expiresAt <= now;
 }
+import '$app/server';

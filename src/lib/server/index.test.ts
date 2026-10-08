@@ -704,3 +704,4 @@ describe('OIDC request data', () => {
         expect(cookies.delete).toHaveBeenCalledWith('oidc_session', expect.any(Object));
     });
 });
+import '$app/server';

@@ -1,6 +1,6 @@
 import {createOIDC} from '@sourceregistry/sveltekit-oidc/server';
-import {env as $public} from '$env/dynamic/public';
-import {env as $private} from '$env/dynamic/private';
+import {PUBLIC_OIDC_ISSUER, PUBLIC_OIDC_CLIENT_ID} from '$app/env/public';
+import {SECRET_OIDC_CLIENT_SECRET, SECRET_OIDC_COOKIE_SECRET} from '$app/env/private';
 
 type AppIdentity = {
     sub: string;
@@ -10,10 +10,10 @@ type AppIdentity = {
 };
 
 export const oidc = createOIDC<AppIdentity>({
-    issuer: $public['PUBLIC_OIDC_ISSUER']!,
-    clientId: $public['PUBLIC_OIDC_CLIENT_ID']!,
-    clientSecret: $private['SECRET_OIDC_CLIENT_SECRET']!,
-    cookieSecret: $private['SECRET_OIDC_COOKIE_SECRET']!,
+    issuer: PUBLIC_OIDC_ISSUER,
+    clientId: PUBLIC_OIDC_CLIENT_ID,
+    clientSecret: SECRET_OIDC_CLIENT_SECRET,
+    cookieSecret: SECRET_OIDC_COOKIE_SECRET,
     clockSkewSeconds: 30,
     sessionStore: 'memory',
     allowInsecureHttp: true, // Local development only; omit this in production.

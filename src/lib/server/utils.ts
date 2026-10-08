@@ -177,9 +177,7 @@ export function parseProviderError(event: {url: URL}) {
     const code = event.url.searchParams.get('error');
     if (!code) return null;
 
-    return error(400, {
-        message: event.url.searchParams.get('error_description') ?? code
-    });
+    return error(400, event.url.searchParams.get('error_description') ?? code);
 }
 
 export function absoluteUrl(event: {url: URL}, pathOrUrl: string) {
@@ -208,25 +206,25 @@ export function validateIdTokenClaims(
     requireNonce = true
 ) {
     if (!Number.isFinite(claims.exp)) {
-        throw error(401, {message: 'id_token expiration is required'});
+        throw error(401, 'id_token expiration is required');
     }
     if (!Number.isFinite(claims.iat)) {
-        throw error(401, {message: 'id_token issued-at time is required'});
+        throw error(401, 'id_token issued-at time is required');
     }
     if (requireNonce && claims.nonce !== nonce) {
-        throw error(401, {message: 'Invalid id_token nonce'});
+        throw error(401, 'Invalid id_token nonce');
     }
     if (!claims.sub) {
-        throw error(401, {message: 'id_token subject is required'});
+        throw error(401, 'id_token subject is required');
     }
     if (clientId) {
         const audiences = Array.isArray(claims.aud) ? claims.aud : claims.aud ? [claims.aud] : [];
         const trusted = new Set([clientId, ...trustedAudiences]);
         if (!audiences.includes(clientId) || audiences.some((audience) => !trusted.has(audience))) {
-            throw error(401, {message: 'id_token contains an untrusted audience'});
+            throw error(401, 'id_token contains an untrusted audience');
         }
         if (claims.azp !== undefined && claims.azp !== clientId) {
-            throw error(401, {message: 'Invalid id_token authorized party'});
+            throw error(401, 'Invalid id_token authorized party');
         }
     }
 }
@@ -234,29 +232,23 @@ export function validateIdTokenClaims(
 export function validateRefreshedIdTokenClaims(previous: OIDCUserClaims, claims: OIDCUserClaims) {
     const normalizeAudience = (value: OIDCUserClaims['aud']) =>
         (Array.isArray(value) ? [...value] : value === undefined ? [] : [value]).sort();
-    if (claims.sub !== previous.sub) throw error(401, {message: 'Refreshed id_token subject changed'});
+    if (claims.sub !== previous.sub) throw error(401, 'Refreshed id_token subject changed');
     if (JSON.stringify(normalizeAudience(claims.aud)) !== JSON.stringify(normalizeAudience(previous.aud))) {
-        throw error(401, {message: 'Refreshed id_token audience changed'});
+        throw error(401, 'Refreshed id_token audience changed');
     }
     if (claims.azp !== previous.azp)
-        throw error(401, {
-            message: 'Refreshed id_token authorized party changed'
-        });
+        throw error(401, 'Refreshed id_token authorized party changed');
     if (claims.auth_time !== undefined && claims.auth_time !== previous.auth_time) {
-        throw error(401, {
-            message: 'Refreshed id_token authentication time changed'
-        });
+        throw error(401, 'Refreshed id_token authentication time changed');
     }
     if (claims.nonce !== undefined && claims.nonce !== previous.nonce) {
-        throw error(401, {message: 'Invalid refreshed id_token nonce'});
+        throw error(401, 'Invalid refreshed id_token nonce');
     }
 }
 
 export function validateUserInfoSubject(claims: OIDCUserClaims, user: OIDCUserClaims | undefined) {
     if (user && user.sub !== claims.sub) {
-        throw error(401, {
-            message: 'UserInfo subject does not match id_token subject'
-        });
+        throw error(401, 'UserInfo subject does not match id_token subject');
     }
 }
 
@@ -277,3 +269,4 @@ export function toPublicSession<TIdentity extends OIDCUserClaims = OIDCUserClaim
         sub: session.sub
     };
 }
+import '$app/server';

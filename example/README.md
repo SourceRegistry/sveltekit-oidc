@@ -1,6 +1,6 @@
 # sveltekit-oidc example
 
-This application demonstrates the current v2 API. CI installs the package produced by the parent
+This application demonstrates the current API with SvelteKit 3. CI installs the package produced by the parent
 checkout before checking and building the application, so it also serves as a package-consumer test.
 
 Configure at least:

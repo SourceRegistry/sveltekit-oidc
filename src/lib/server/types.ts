@@ -1,4 +1,5 @@
-import type {Action, Cookies, Handle, RequestEvent} from '@sveltejs/kit';
+import type {Action, Cookies, RequestEvent} from '@sveltejs/kit';
+import type {Handle} from '@sveltejs/kit/hooks';
 import type {KeyObject} from 'node:crypto';
 
 export type MaybePromise<T> = Promise<T> | T;
@@ -455,3 +456,4 @@ export type OIDCLocals<T extends OIDCInstance<any, any>> = OIDCHandleLocals<
     OIDCInferIdentity<T>,
     OIDCInferRequestData<T>
 >;
+import '$app/server';

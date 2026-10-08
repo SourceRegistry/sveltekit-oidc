@@ -108,3 +108,4 @@ describe('createInMemorySessionStore', () => {
         await expect(store.get('session-1')).resolves.toBeNull();
     });
 });
+import '$app/server';

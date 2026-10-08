@@ -199,3 +199,4 @@ describe('OIDC identity validation', () => {
         );
     });
 });
+import '$app/server';

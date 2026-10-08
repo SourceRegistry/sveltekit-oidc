@@ -1,5 +1,5 @@
 import type { OIDCLocals } from '@sourceregistry/sveltekit-oidc/server';
-import type { oidc } from '$lib/server/configurations/oidc.configuration';
+import type { oidc } from '#lib/server/configurations/oidc.configuration.js';
 
 // See https://svelte.dev/docs/kit/types#app.d.ts
 declare global {

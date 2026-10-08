@@ -1,4 +1,5 @@
-import {type Action, type Cookies, error, type Handle, redirect, type RequestEvent} from '@sveltejs/kit';
+import {type Action, type Cookies, error, redirect, type RequestEvent} from '@sveltejs/kit';
+import type {Handle} from '@sveltejs/kit/hooks';
 import {createHash, randomBytes} from 'node:crypto';
 import {fromWeb} from '@sourceregistry/node-jwt/promises';
 import {decode as decodeJwt, verify as verifyJwt, type JWKSResolver} from '@sourceregistry/node-jwt';
@@ -204,24 +205,20 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         try {
             url = new URL(value);
         } catch {
-            throw error(500, {message: `OIDC ${name} must be an absolute URL`});
+            throw error(500, `OIDC ${name} must be an absolute URL`);
         }
         if (!options.allowInsecureHttp && url.protocol !== 'https:') {
-            throw error(500, {message: `OIDC ${name} must use HTTPS`});
+            throw error(500, `OIDC ${name} must use HTTPS`);
         }
         if (url.hash || (issuer && url.search)) {
-            throw error(500, {
-                message: `OIDC ${name} must not contain a query or fragment`
-            });
+            throw error(500, `OIDC ${name} must not contain a query or fragment`);
         }
     }
 
     function validateMetadata(document: OIDCDiscoveryDocument, expectedIssuer?: string): OIDCDiscoveryDocument {
         const issuer = normalizeIssuer(document.issuer ?? '');
         if (!issuer || (expectedIssuer && issuer !== expectedIssuer)) {
-            throw error(500, {
-                message: 'OIDC discovery issuer does not match the configured issuer'
-            });
+            throw error(500, 'OIDC discovery issuer does not match the configured issuer');
         }
         validateProtocolUrl('issuer', issuer, true);
         validateProtocolUrl('authorization_endpoint', document.authorization_endpoint);
@@ -320,9 +317,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             (configuredIssuer ? `${configuredIssuer}/.well-known/openid-configuration` : undefined);
 
         if (!discoveryUrl) {
-            throw error(500, {
-                message: 'OIDC issuer or discoveryUrl must be configured'
-            });
+            throw error(500, 'OIDC issuer or discoveryUrl must be configured');
         }
 
         validateProtocolUrl('discoveryUrl', discoveryUrl);
@@ -384,9 +379,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             jwksPromise = getMetadata()
                 .then((metadata) => {
                     if (!metadata.jwks_uri) {
-                        throw error(500, {
-                            message: 'OIDC jwks_uri is required to validate id_token values'
-                        });
+                        throw error(500, 'OIDC jwks_uri is required to validate id_token values');
                     }
 
                     return fromWeb(metadata.jwks_uri, {
@@ -417,18 +410,16 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         try {
             header = decodeJwt(token).header;
         } catch {
-            throw error(400, {message: 'Invalid JWT format'});
+            throw error(400, 'Invalid JWT format');
         }
         const algorithms: SupportedAlgorithm[] = verifyOptions.algorithms?.length
             ? verifyOptions.algorithms
             : ['RS256'];
         if (!header.alg || !algorithms.includes(header.alg as SupportedAlgorithm)) {
-            throw error(401, {
-                message: `JWT algorithm '${header.alg ?? 'missing'}' is not allowed`
-            });
+            throw error(401, `JWT algorithm '${header.alg ?? 'missing'}' is not allowed`);
         }
         if (header.typ && verifyOptions.types && !verifyOptions.types.includes(header.typ)) {
-            throw error(401, {message: `JWT type '${header.typ}' is not allowed`});
+            throw error(401, `JWT type '${header.typ}' is not allowed`);
         }
 
         const nodeJwtOptions = {
@@ -468,9 +459,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             }
             throw lastError ?? new Error('Unable to resolve a signing key from JWKS');
         } catch (err) {
-            throw error(401, {
-                message: err instanceof Error ? err.message : 'JWT verification failed'
-            });
+            throw error(401, err instanceof Error ? err.message : 'JWT verification failed');
         }
     }
 
@@ -486,17 +475,13 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 return {headers, body};
             case 'client_secret_basic':
                 if (!options.clientSecret) {
-                    throw error(500, {
-                        message: 'clientSecret is required for client_secret_basic'
-                    });
+                    throw error(500, 'clientSecret is required for client_secret_basic');
                 }
                 headers.authorization = asAuthorizationHeader(options.clientId, options.clientSecret);
                 return {headers, body};
             case 'client_secret_post':
                 if (!options.clientSecret) {
-                    throw error(500, {
-                        message: 'clientSecret is required for client_secret_post'
-                    });
+                    throw error(500, 'clientSecret is required for client_secret_post');
                 }
                 body.set('client_id', options.clientId);
                 body.set('client_secret', options.clientSecret);
@@ -516,9 +501,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 return {headers, body};
             case 'private_key_jwt':
                 if (!options.privateKeyJwt?.privateKey) {
-                    throw error(500, {
-                        message: 'privateKeyJwt.privateKey is required for private_key_jwt'
-                    });
+                    throw error(500, 'privateKeyJwt.privateKey is required for private_key_jwt');
                 }
                 body.set('client_id', options.clientId);
                 body.set(
@@ -532,9 +515,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 body.set('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
                 return {headers, body};
             default:
-                throw error(500, {
-                    message: `Unsupported client authentication method '${clientAuthMethod}'`
-                });
+                throw error(500, `Unsupported client authentication method '${clientAuthMethod}'`);
         }
     }
 
@@ -597,9 +578,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             supported.has(algorithm as SupportedAlgorithm)
         );
         if (!algorithms.length)
-            throw error(500, {
-                message: 'Provider has no supported ID-token signing algorithm'
-            });
+            throw error(500, 'Provider has no supported ID-token signing algorithm');
         return algorithms;
     }
 
@@ -661,19 +640,17 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             typeof claims.jti !== 'string' ||
             !claims.jti
         ) {
-            throw error(400, {
-                message: 'logout_token must contain valid iat, exp, and jti claims'
-            });
+            throw error(400, 'logout_token must contain valid iat, exp, and jti claims');
         }
         const event = claims.events?.['http://schemas.openid.net/event/backchannel-logout'];
         if (!event || typeof event !== 'object' || Array.isArray(event)) {
-            throw error(400, {message: 'Invalid logout_token events claim'});
+            throw error(400, 'Invalid logout_token events claim');
         }
         if (!claims.sid && !claims.sub) {
-            throw error(400, {message: 'logout_token must contain sid or sub'});
+            throw error(400, 'logout_token must contain sid or sub');
         }
         if ('nonce' in claims && claims.nonce !== undefined) {
-            throw error(400, {message: 'logout_token must not contain nonce'});
+            throw error(400, 'logout_token must not contain nonce');
         }
 
         return claims;
@@ -884,14 +861,12 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         }
         for (const [key, value] of Object.entries(loginOptions.extraParams ?? {})) {
             if (RESERVED_AUTHORIZATION_PARAMETERS.has(key)) {
-                throw error(500, {
-                    message: `extraParams must not override reserved parameter '${key}'`
-                });
+                throw error(500, `extraParams must not override reserved parameter '${key}'`);
             }
             authorizationUrl.searchParams.set(key, value);
         }
 
-        throw redirect(302, authorizationUrl.toString());
+        throw redirect(302, authorizationUrl.toString(), {external: true});
     }
 
     async function handleCallback(event: {url: URL; cookies: Cookies}): Promise<OIDCCallbackResult<TIdentity>> {
@@ -910,7 +885,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         );
         const providerError = parseProviderError(event);
         if (providerError) {
-            if (!stateMatches) throw error(400, {message: 'Invalid or expired callback state'});
+            if (!stateMatches) throw error(400, 'Invalid or expired callback state');
             cookieStore.clearState(event.cookies, decodedState.token);
             throw providerError;
         }
@@ -943,21 +918,15 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             typeof tokenResponse.token_type !== 'string' ||
             !tokenResponse.token_type
         ) {
-            throw error(401, {
-                message: 'OIDC callback response must include access_token and token_type'
-            });
+            throw error(401, 'OIDC callback response must include access_token and token_type');
         }
         if (!tokenResponse.id_token) {
-            throw error(401, {
-                message: 'OIDC callback response must include an id_token'
-            });
+            throw error(401, 'OIDC callback response must include an id_token');
         }
 
         const idTokenClaims = await validateIdToken(tokenResponse.id_token, stateCookie.nonce);
         if (stateCookie.prompt === 'none' && stateCookie.originalSub && idTokenClaims.sub !== stateCookie.originalSub) {
-            throw error(401, {
-                message: 'Silent re-authentication returned a different End-User'
-            });
+            throw error(401, 'Silent re-authentication returned a different End-User');
         }
         const userInfo =
             options.fetchUserInfo === false
@@ -1038,26 +1007,22 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             url.searchParams.set('state', logoutOptions.state);
         }
 
-        throw redirect(302, url.toString());
+        throw redirect(302, url.toString(), {external: true});
     }
 
     async function handleBackChannelLogout(event: {request: Request}) {
         const metadata = await getMetadata();
         if (!metadata.backchannel_logout_supported) {
-            throw error(400, {
-                message: 'Provider does not advertise back-channel logout support'
-            });
+            throw error(400, 'Provider does not advertise back-channel logout support');
         }
         if (!backChannelLogoutStore) {
-            throw error(500, {
-                message: 'backChannelLogoutStore is required for back-channel logout with cookie sessions'
-            });
+            throw error(500, 'backChannelLogoutStore is required for back-channel logout with cookie sessions');
         }
 
         const form = await event.request.formData();
         const logoutToken = form.get('logout_token')?.toString();
         if (!logoutToken) {
-            throw error(400, {message: 'logout_token is required'});
+            throw error(400, 'logout_token is required');
         }
 
         const claims = await validateBackChannelLogoutToken(logoutToken);
@@ -1089,11 +1054,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
 
     const handle: Handle = async ({event, resolve}) => {
         const oidc = await createRequestContext(event);
-        (
-            event.locals as typeof event.locals & {
-                oidc: OIDCHandleLocals<TIdentity, TRequestData>;
-            }
-        ).oidc = oidc;
+        Object.assign(event.locals, {oidc});
         return resolve(event);
     };
 
@@ -1109,7 +1070,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             data,
             requireAuth: async () => {
                 if (!session) {
-                    throw error(401, {message: 'Authentication required'});
+                    throw error(401, 'Authentication required');
                 }
                 return session;
             },
@@ -1299,3 +1260,4 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
 }
 
 export const OpenIDConnect = createOIDC;
+import '$app/server';

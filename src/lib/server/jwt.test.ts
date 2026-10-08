@@ -10,3 +10,4 @@ describe('client_secret_basic', () => {
         expect(decoded).toBe('client%3Aid:secret+with%3Acolon');
     });
 });
+import '$app/server';

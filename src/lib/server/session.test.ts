@@ -106,3 +106,4 @@ describe('isSessionExpired', () => {
 		expect(isSessionExpired(unrefreshableSession, 1000, 200)).toBe(true);
 	});
 });
+import '$app/server';

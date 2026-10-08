@@ -1,4 +1,4 @@
-import type { OIDCHandleLocals } from '$lib/server';
+import type { OIDCHandleLocals } from './lib/server/index.js';
 
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces

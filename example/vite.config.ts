@@ -1,6 +1,12 @@
 import {sveltekit} from '@sveltejs/kit/vite';
+import adapter from '@sveltejs/adapter-auto';
 import {defineConfig} from 'vite';
 
 export default defineConfig({
-    plugins: await sveltekit()
+    plugins: [sveltekit({
+        adapter: adapter(),
+        compilerOptions: {
+            runes: ({filename}) => filename.split(/[/\\]/).includes('node_modules') ? undefined : true
+        }
+    })]
 });
