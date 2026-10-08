@@ -1,3 +1,11 @@
+## [3.0.2](https://github.com/SourceRegistry/sveltekit-oidc/compare/v3.0.1...v3.0.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* document SvelteKit 3 setup and enable example logout store ([d44ed48](https://github.com/SourceRegistry/sveltekit-oidc/commit/d44ed482837ae4b471a457b574ed633e68cb8e7e))
+* harden OIDC refresh and session lifecycle ([427b527](https://github.com/SourceRegistry/sveltekit-oidc/commit/427b527048d978485519d84289aad42ddf2a45f1))
+
 ## [3.0.1](https://github.com/SourceRegistry/sveltekit-oidc/compare/v3.0.0...v3.0.1) (2026-09-06)
 
 
