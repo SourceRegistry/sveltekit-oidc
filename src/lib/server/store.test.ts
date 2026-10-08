@@ -80,6 +80,34 @@ describe('createInMemoryBackChannelLogoutStore', () => {
             })
         ).resolves.toBe(false);
     });
+
+    it('limits a logout token with both sid and sub to the identified session', async () => {
+        const store = createInMemoryBackChannelLogoutStore();
+        const session = (sid: string) => ({
+            issuer: 'https://issuer.example',
+            clientId: 'client',
+            sid,
+            sub: 'user-1',
+            groups: [],
+            idTokenClaims: {sub: 'user-1'},
+            identity: {sub: 'user-1'},
+            tokens: {accessToken: 'access', tokenType: 'Bearer', scope: ['openid']},
+            createdAt: 100,
+            refreshedAt: 100
+        });
+
+        await store.revoke({
+            issuer: 'https://issuer.example',
+            clientId: 'client',
+            sid: 'sid-1',
+            sub: 'user-1',
+            jti: 'jti-1',
+            iat: 101
+        });
+
+        await expect(store.isRevoked(session('sid-1'))).resolves.toBe(true);
+        await expect(store.isRevoked(session('sid-2'))).resolves.toBe(false);
+    });
 });
 
 describe('createInMemorySessionStore', () => {

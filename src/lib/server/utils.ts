@@ -177,7 +177,7 @@ export function parseProviderError(event: {url: URL}) {
     const code = event.url.searchParams.get('error');
     if (!code) return null;
 
-    return error(400, event.url.searchParams.get('error_description') ?? code);
+    return event.url.searchParams.get('error_description') ?? code;
 }
 
 export function absoluteUrl(event: {url: URL}, pathOrUrl: string) {

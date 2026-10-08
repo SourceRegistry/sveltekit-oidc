@@ -363,6 +363,7 @@ export type OIDCStateCookie = {
     returnTo: string;
     prompt?: OIDCLoginOptions['prompt'];
     originalSub?: string;
+    originalNonce?: string;
     createdAt: number;
 };
 

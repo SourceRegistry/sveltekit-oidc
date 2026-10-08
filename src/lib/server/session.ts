@@ -12,10 +12,11 @@ export function normalizeTokens(
 		idToken: tokenResponse.id_token ?? existing?.idToken,
 		refreshToken: tokenResponse.refresh_token ?? existing?.refreshToken,
 		scope: tokenResponse.scope ? tokenResponse.scope.split(' ') : (existing?.scope ?? defaultScope),
-		expiresAt: tokenResponse.expires_in ? now + tokenResponse.expires_in : existing?.expiresAt,
-		refreshExpiresAt: tokenResponse.refresh_expires_in
+		// The previous access token's expiry does not describe the new token.
+		expiresAt: tokenResponse.expires_in !== undefined ? now + tokenResponse.expires_in : undefined,
+		refreshExpiresAt: tokenResponse.refresh_expires_in !== undefined
 			? now + tokenResponse.refresh_expires_in
-			: existing?.refreshExpiresAt
+			: tokenResponse.refresh_token !== undefined ? undefined : existing?.refreshExpiresAt
 	};
 }
 
@@ -24,7 +25,7 @@ export function shouldRefresh<TClaims extends OIDCUserClaims = OIDCUserClaims>(
 	refreshToleranceSeconds: number,
 	now = Math.floor(Date.now() / 1000)
 ) {
-	if (!session.tokens.expiresAt || !session.tokens.refreshToken) {
+	if (session.tokens.expiresAt === undefined || !session.tokens.refreshToken) {
 		return false;
 	}
 

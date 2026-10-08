@@ -334,7 +334,8 @@ The built-in `'memory'` stores are intended for local development or single-proc
 
 Providers that rotate refresh tokens also need a distributed `refreshLock` in multi-instance
 deployments. The built-in promise coalescing prevents duplicate refreshes within one process; the
-lock must serialize the supplied operation by session ID across every application instance:
+lock must serialize the supplied operation by session ID across every application instance. It also
+serializes session clearing with a refresh on another instance:
 
 ```ts
 const refreshLock = {
@@ -354,12 +355,22 @@ const refreshLock = {
   party, and authentication time.
 - UserInfo `sub` must match the validated ID token subject.
 - Cookie sessions use authenticated encryption.
+- Persisted sessions are checked against the configured client ID and issuer before use.
+- A fresh login retires the previous server-stored session ID before issuing a new one.
+- Silent re-authentication keeps a newer local login intact and retains a current session during temporary provider failures.
 - Return and post-logout redirect values are restricted to same-origin paths.
 - Local sessions have an eight-hour maximum lifetime by default.
 - Refresh is automatic while a valid refresh token is available and is coalesced per session within a
-  process.
+  process. A temporary token-endpoint failure keeps a still-valid access token so the next request can
+  retry. If the access token has expired, it returns a temporary 503 error but retains refresh credentials
+  for a later retry. A rejected refresh token clears the session. If UserInfo is unavailable
+  after a successful refresh, the rotated tokens are saved without carrying forward old UserInfo claims. The provider
+  must return `expires_in` for expiry-driven automatic refresh; when it is omitted, the new access token's
+  lifetime is unknown and the previous token's expiry is not reused.
+  A rotated refresh token also does not inherit the previous refresh token's expiry.
 - Back-channel logout tokens require the logout event, `iat`, `exp`, `jti`, and exactly one or both of
-  `sid` and `sub`; `nonce` is rejected. Revocations expire and do not revoke later logins permanently.
+  `sid` and `sub`; `nonce` is rejected. A token with `sid` revokes only that session, while a token with
+  `sub` alone revokes that user's sessions. Revocations expire and do not revoke later logins permanently.
 - Local session clearing does not depend on provider discovery being available.
 - Client authentication supports `none`, `client_secret_basic`, `client_secret_post`, `client_secret_jwt`, and `private_key_jwt`.
 

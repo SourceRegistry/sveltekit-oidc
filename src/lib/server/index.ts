@@ -152,6 +152,10 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         maxCookieSizeBytes
     );
 
+    const refreshTasks = new Map<string, Promise<OIDCSession<TIdentity> | null>>();
+    const activeRefreshes = new Set<string>();
+    const invalidatedRefreshes = new Set<string>();
+
     let metadataPromise: Promise<OIDCDiscoveryDocument> | undefined;
     let jwksPromise: Promise<JWKSResolver> | undefined;
     let cachedMetadata: OIDCDiscoveryDocument | undefined;
@@ -159,6 +163,8 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     let metadataNextRefreshAttemptAt = 0;
     let metadataRefreshInFlight: Promise<void> | undefined;
     const configuredIssuer = options.issuer ? normalizeIssuer(options.issuer) : undefined;
+    const expectedSessionIssuer = configuredIssuer ??
+        (options.endpoints?.issuer ? normalizeIssuer(options.endpoints.issuer) : undefined);
     const discoveryRetryAttempts = Math.max(1, options.discoveryRetry?.attempts ?? 5);
     const discoveryRetryInitialDelayMs = Math.max(0, options.discoveryRetry?.initialDelayMs ?? 500);
     const discoveryRetryMaxDelayMs = Math.max(
@@ -207,6 +213,9 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         } catch {
             throw error(500, `OIDC ${name} must be an absolute URL`);
         }
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            throw error(500, `OIDC ${name} must use HTTP or HTTPS`);
+        }
         if (!options.allowInsecureHttp && url.protocol !== 'https:') {
             throw error(500, `OIDC ${name} must use HTTPS`);
         }
@@ -230,7 +239,14 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     }
 
     function hasCurrentSessionShape(session: OIDCSession<TIdentity> | null): session is OIDCSession<TIdentity> {
-        return Boolean(session?.identity?.sub && session.idTokenClaims?.sub);
+        const issuer = expectedSessionIssuer ?? cachedMetadata?.issuer;
+        return Boolean(
+            session?.identity?.sub &&
+            session.idTokenClaims?.sub &&
+            session.clientId === options.clientId &&
+            typeof session.issuer === 'string' &&
+            (!issuer || normalizeIssuer(session.issuer) === issuer)
+        );
     }
 
     async function readPersistedSession(
@@ -295,7 +311,14 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
 
         const id = sessionId ?? cookieStore.readSessionReference(cookies)?.id;
         if (id) {
-            await sessionStore.delete(id);
+            if (refreshTasks.has(id)) invalidatedRefreshes.add(id);
+            // Use the same distributed lock as refresh, unless this instance is
+            // already refreshing the session (for example from an application hook).
+            if (options.refreshLock && !activeRefreshes.has(id)) {
+                await options.refreshLock.runExclusive(id, () => Promise.resolve(sessionStore.delete(id)));
+            } else {
+                await sessionStore.delete(id);
+            }
         }
         cookieStore.clearSessionReference(cookies);
     }
@@ -555,6 +578,35 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         );
     }
 
+    function validateTokenResponse(response: OIDCTokenResponse): OIDCTokenResponse {
+        if (
+            !response ||
+            typeof response.access_token !== 'string' ||
+            !response.access_token ||
+            typeof response.token_type !== 'string' ||
+            response.token_type.toLowerCase() !== 'bearer'
+        ) {
+            throw error(401, 'OIDC token response must include an access_token with Bearer token_type');
+        }
+        if (
+            (response.refresh_token !== undefined &&
+                (typeof response.refresh_token !== 'string' || !response.refresh_token)) ||
+            (response.id_token !== undefined && (typeof response.id_token !== 'string' || !response.id_token)) ||
+            (response.scope !== undefined && typeof response.scope !== 'string') ||
+            (response.expires_in !== undefined &&
+                (typeof response.expires_in !== 'number' ||
+                    !Number.isFinite(response.expires_in) ||
+                    response.expires_in <= 0)) ||
+            (response.refresh_expires_in !== undefined &&
+                (typeof response.refresh_expires_in !== 'number' ||
+                    !Number.isFinite(response.refresh_expires_in) ||
+                    response.refresh_expires_in < 0))
+        ) {
+            throw error(401, 'OIDC token response contains invalid token fields');
+        }
+        return response;
+    }
+
     function idTokenAlgorithms(metadata: OIDCDiscoveryDocument): SupportedAlgorithm[] {
         const supported = new Set<SupportedAlgorithm>([
             'HS256',
@@ -681,17 +733,18 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         return backChannelLogoutStore.isRevoked(session);
     }
 
-    const refreshTasks = new Map<string, Promise<OIDCSession<TIdentity> | null>>();
-
     async function refreshSessionTokens(session: OIDCSession<TIdentity>, event?: MinimalRequestEvent) {
-        const tokenResponse = await refreshTokens(session.tokens.refreshToken as string);
+        const tokenResponse = validateTokenResponse(await refreshTokens(session.tokens.refreshToken as string));
         const idTokenClaims = tokenResponse.id_token
             ? await validateRefreshedIdToken(tokenResponse.id_token, session.idTokenClaims)
             : session.idTokenClaims;
         const userInfo =
-            options.fetchUserInfo !== false && tokenResponse.access_token
-                ? await fetchUserInfo(tokenResponse.access_token)
-                : session.userInfo;
+            options.fetchUserInfo !== false
+                ? await fetchUserInfo(tokenResponse.access_token).catch((err) => {
+                      log.warn('OIDC UserInfo unavailable after token refresh; omitting stale claims', err);
+                      return undefined;
+                  })
+                : undefined;
         validateUserInfoSubject(idTokenClaims, userInfo);
         const identity = await resolveIdentity(idTokenClaims, userInfo, 'refresh');
         const nextSession: OIDCSession<TIdentity> = {
@@ -759,10 +812,16 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 .digest('base64url');
         let task = refreshTasks.get(refreshKey);
         if (!task) {
+            let started = false;
             const execute = async () => {
+                started = true;
+                activeRefreshes.add(refreshKey);
                 let current = session;
                 if (sessionStore && persisted?.id) {
-                    current = (await sessionStore.get(persisted.id)) ?? session;
+                    const latest = await sessionStore.get(persisted.id);
+                    if (!latest) return null;
+                    current = latest;
+                    if (invalidatedRefreshes.has(persisted.id)) return null;
                     if (!shouldRefresh(current, refreshToleranceSeconds)) return current;
                 }
                 try {
@@ -771,21 +830,62 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                         refreshExpiresAt: current.tokens.refreshExpiresAt
                     });
                     const refreshed = await refreshSessionTokens(current, event);
-                    if (sessionStore) await writePersistedSession(cookies, refreshed, persisted?.id);
-                    return refreshed;
-                } catch (err) {
-                    log.error('Token refresh failed — clearing session', err);
                     if (sessionStore && persisted?.id) {
                         const latest = await sessionStore.get(persisted.id);
-                        if (latest?.tokens.refreshToken !== current.tokens.refreshToken) return latest;
-                        await sessionStore.delete(persisted.id);
+                        // Logout may have removed the session while the token request was in flight.
+                        if (!latest) return null;
+                        if (latest.tokens.refreshToken !== current.tokens.refreshToken) return latest;
+                        if (invalidatedRefreshes.has(persisted.id)) return null;
+                        if (isSessionExpired(refreshed, sessionMaxAgeSeconds) || await isRevoked(refreshed)) {
+                            await sessionStore.delete(persisted.id);
+                            return null;
+                        }
+                        await writePersistedSession(cookies, refreshed, persisted.id);
+                        if (invalidatedRefreshes.has(persisted.id)) {
+                            await sessionStore.delete(persisted.id);
+                            return null;
+                        }
                     }
+                    return refreshed;
+                } catch (err) {
+                    let latest: OIDCSession<TIdentity> | null = null;
+                    if (sessionStore && persisted?.id) {
+                        if (invalidatedRefreshes.has(persisted.id)) return null;
+                        latest = await sessionStore.get(persisted.id);
+                        if (!latest) return null;
+                        if (latest?.tokens.refreshToken !== current.tokens.refreshToken) return latest;
+                    }
+                    const status = (err as {status?: number} | null)?.status;
+                    const transient = status === undefined || status === 408 || status === 429 || status >= 500;
+                    if (transient) {
+                        if (current.tokens.expiresAt === undefined || current.tokens.expiresAt > Date.now() / 1000) {
+                            log.warn('OIDC token refresh failed; keeping the still-valid session for a later retry', err);
+                            return latest ?? current;
+                        }
+                        log.warn('OIDC token refresh temporarily unavailable; retaining credentials for a later retry', err);
+                        throw error(503, 'OIDC token refresh temporarily unavailable');
+                    }
+                    log.error('Token refresh failed — clearing session', err);
+                    if (sessionStore && persisted?.id) await sessionStore.delete(persisted.id);
                     return null;
                 }
             };
-            task = (options.refreshLock ? options.refreshLock.runExclusive(refreshKey, execute) : execute()).finally(
+            task = (options.refreshLock
+                ? Promise.resolve().then(() => options.refreshLock!.runExclusive(refreshKey, execute))
+                : execute()).catch((err) => {
+                if (!started) {
+                    if (session.tokens.expiresAt === undefined || session.tokens.expiresAt > Date.now() / 1000) {
+                        log.warn('OIDC refresh lock unavailable; keeping the still-valid session', err);
+                        return session;
+                    }
+                    throw error(503, 'OIDC token refresh temporarily unavailable');
+                }
+                throw err;
+            }).finally(
                 () => {
                     refreshTasks.delete(refreshKey);
+                    activeRefreshes.delete(refreshKey);
+                    invalidatedRefreshes.delete(refreshKey);
                 }
             );
             refreshTasks.set(refreshKey, task);
@@ -797,12 +897,18 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             else cookieStore.clearSession(cookies);
             return null;
         }
-        if (!sessionStore) await writePersistedSession(cookies, refreshed);
-        log.debug('OIDC session tokens refreshed', {
-            expiresAt: refreshed.tokens.expiresAt,
-            refreshExpiresAt: refreshed.tokens.refreshExpiresAt,
-            hasRefreshToken: Boolean(refreshed.tokens.refreshToken)
-        });
+        if (isSessionExpired(refreshed, sessionMaxAgeSeconds) || await isRevoked(refreshed)) {
+            await clearPersistedSession(cookies, persisted?.id);
+            return null;
+        }
+        if (!sessionStore && refreshed !== session) await writePersistedSession(cookies, refreshed);
+        if (refreshed !== session) {
+            log.debug('OIDC session tokens refreshed', {
+                expiresAt: refreshed.tokens.expiresAt,
+                refreshExpiresAt: refreshed.tokens.refreshExpiresAt,
+                hasRefreshToken: Boolean(refreshed.tokens.refreshToken)
+            });
+        }
         return refreshed;
     }
 
@@ -836,6 +942,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             returnTo,
             prompt: loginOptions.prompt,
             originalSub: existingSession?.session.sub,
+            originalNonce: existingSession?.session.nonce,
             createdAt: Math.floor(Date.now() / 1000)
         });
 
@@ -887,7 +994,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         if (providerError) {
             if (!stateMatches) throw error(400, 'Invalid or expired callback state');
             cookieStore.clearState(event.cookies, decodedState.token);
-            throw providerError;
+            throw error(400, providerError);
         }
 
         if (!stateCookie || !code || !stateMatches) {
@@ -906,20 +1013,13 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
 
         cookieStore.clearState(event.cookies, decodedState.token);
 
-        const tokenResponse = await exchangeCode({
-            code,
-            redirectUri: absoluteUrl(event, redirectPath),
-            codeVerifier: stateCookie.codeVerifier
-        });
-
-        if (
-            typeof tokenResponse.access_token !== 'string' ||
-            !tokenResponse.access_token ||
-            typeof tokenResponse.token_type !== 'string' ||
-            !tokenResponse.token_type
-        ) {
-            throw error(401, 'OIDC callback response must include access_token and token_type');
-        }
+        const tokenResponse = validateTokenResponse(
+            await exchangeCode({
+                code,
+                redirectUri: absoluteUrl(event, redirectPath),
+                codeVerifier: stateCookie.codeVerifier
+            })
+        );
         if (!tokenResponse.id_token) {
             throw error(401, 'OIDC callback response must include an id_token');
         }
@@ -957,8 +1057,22 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 event: event as MinimalRequestEvent,
                 tokenResponse
             })) ?? session;
-        const existingSession = stateCookie.prompt === 'none' ? await readPersistedSession(event.cookies) : null;
-        await writePersistedSession(event.cookies, persistedSession, existingSession?.id);
+        const existingSession = await readPersistedSession(event.cookies);
+        if (
+            stateCookie.prompt === 'none' &&
+            (existingSession?.session.sub !== stateCookie.originalSub ||
+                (stateCookie.originalNonce !== undefined && existingSession?.session.nonce !== stateCookie.originalNonce))
+        ) {
+            throw error(401, 'Silent re-authentication no longer matches the local session');
+        }
+        if (stateCookie.prompt !== 'none' && existingSession?.id) {
+            await clearPersistedSession(event.cookies, existingSession.id);
+        }
+        await writePersistedSession(
+            event.cookies,
+            persistedSession,
+            stateCookie.prompt === 'none' ? existingSession?.id : undefined
+        );
 
         return {
             session: persistedSession,
@@ -1118,6 +1232,25 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 if (isSilentReauthentication) {
                     cookieStore.clearState(event.cookies, callbackToken);
                     const persisted = await readPersistedSession(event.cookies);
+                    if (
+                        persisted &&
+                        (persisted.session.sub !== stateCookie?.originalSub ||
+                            (stateCookie?.originalNonce !== undefined &&
+                                persisted.session.nonce !== stateCookie.originalNonce))
+                    ) {
+                        log.debug('Silent OIDC re-authentication belongs to a previous local session');
+                        return silentReauthenticationResponse('authenticated');
+                    }
+                    const status = (err as {status?: number} | null)?.status;
+                    const providerError = event.url.searchParams.get('error');
+                    if (
+                        persisted &&
+                        (status === undefined || status === 408 || status === 429 || status >= 500 ||
+                            providerError === 'server_error' || providerError === 'temporarily_unavailable')
+                    ) {
+                        log.warn('Silent OIDC re-authentication temporarily unavailable; retaining local session', err);
+                        return silentReauthenticationResponse('authenticated');
+                    }
                     await clearPersistedSession(event.cookies, persisted?.id);
                     log.debug('Silent OIDC re-authentication failed — clearing local session');
                     return silentReauthenticationResponse('logged_out');

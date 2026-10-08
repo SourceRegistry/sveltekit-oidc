@@ -34,6 +34,37 @@ describe('normalizeTokens', () => {
 			refreshExpiresAt: 20
 		});
 	});
+
+	it('does not reuse an expired access token lifetime when refresh omits expires_in', () => {
+		const tokens = normalizeTokens(
+			{access_token: 'new-access', token_type: 'Bearer'},
+			['openid'],
+			{accessToken: 'old-access', tokenType: 'Bearer', refreshToken: 'old-refresh', scope: ['openid'], expiresAt: 10},
+			100
+		);
+
+		expect(tokens.accessToken).toBe('new-access');
+		expect(tokens.refreshToken).toBe('old-refresh');
+		expect(tokens.expiresAt).toBeUndefined();
+	});
+
+	it('does not reuse the old refresh token lifetime after rotation', () => {
+		const tokens = normalizeTokens(
+			{access_token: 'new-access', token_type: 'Bearer', refresh_token: 'new-refresh', expires_in: 300},
+			['openid'],
+			{
+				accessToken: 'old-access',
+				tokenType: 'Bearer',
+				refreshToken: 'old-refresh',
+				scope: ['openid'],
+				refreshExpiresAt: 150
+			},
+			100
+		);
+
+		expect(tokens.refreshToken).toBe('new-refresh');
+		expect(tokens.refreshExpiresAt).toBeUndefined();
+	});
 });
 
 describe('shouldRefresh', () => {

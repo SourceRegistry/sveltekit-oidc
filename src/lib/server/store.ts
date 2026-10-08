@@ -32,7 +32,9 @@ export function createInMemoryBackChannelLogoutStore<TIdentity extends OIDCUserC
             if (record.sid) {
                 remember(revokedBySid, `${record.issuer}:${record.clientId}:${record.sid}`, record.iat);
             }
-            if (record.sub) {
+            // A subject-only logout applies to every session for the End-User.
+            // When sid is present, the provider identified one session.
+            if (record.sub && !record.sid) {
                 remember(revokedBySub, `${record.issuer}:${record.clientId}:${record.sub}`, record.iat);
             }
         },
