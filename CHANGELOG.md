@@ -1,3 +1,10 @@
+## [3.0.3](https://github.com/SourceRegistry/sveltekit-oidc/compare/v3.0.2...v3.0.3) (2026-10-08)
+
+
+### Bug Fixes
+
+* resolve SvelteKit server marker for JSR publish ([a78787c](https://github.com/SourceRegistry/sveltekit-oidc/commit/a78787c1e5ad09c33d1602bce09da55dcd4f962a))
+
 ## [3.0.2](https://github.com/SourceRegistry/sveltekit-oidc/compare/v3.0.1...v3.0.2) (2026-10-08)
 
 
