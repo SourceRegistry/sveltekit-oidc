@@ -204,7 +204,13 @@ export type OIDCOptions<TIdentity extends OIDCUserClaims = OIDCUserClaims, TRequ
     fetchUserInfo?: boolean;
     sessionCookieName?: string;
     stateCookieName?: string;
-    cookieSecret: string;
+    /**
+     * Secret used to encrypt session and state cookies; at least 32 bytes each.
+     * Pass an array to rotate: the first secret encrypts new values and every
+     * secret is tried when decrypting, so move the new secret to the front and
+     * remove the old one after `sessionMaxAgeSeconds`.
+     */
+    cookieSecret: string | string[];
     cookieOptions?: Partial<CookieOptions>;
     clockSkewSeconds?: number;
     refreshToleranceSeconds?: number;

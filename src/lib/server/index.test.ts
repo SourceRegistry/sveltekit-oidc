@@ -31,7 +31,7 @@ async function createRsaSigner() {
 }
 
 const createCookiesWithSession = (session: OIDCSession): Cookies => {
-    const value = serializeSignedCookie(session, cookieSecret);
+    const value = serializeSignedCookie(session, cookieSecret, 'session');
     return {
         get: vi.fn((name: string) => (name === 'oidc_session' ? value : undefined)),
         getAll: vi.fn(() => []),
@@ -339,7 +339,7 @@ describe('OIDC authorization-code flow', () => {
             delete: async (id: string) => { sessions.delete(id); }
         };
         const cookies = createMutableCookies();
-        cookies.set('oidc_session', serializeSignedCookie({id: 'old-session'}, cookieSecret), {path: '/'});
+        cookies.set('oidc_session', serializeSignedCookie({id: 'old-session'}, cookieSecret, 'session-reference'), {path: '/'});
         const oidc = createOIDC({
             issuer: oldSession.issuer,
             clientId: oldSession.clientId,
@@ -378,7 +378,7 @@ describe('OIDC authorization-code flow', () => {
             codeVerifier: 'new-verifier',
             returnTo: '/dashboard',
             createdAt: now
-        }, cookieSecret), {path: '/'});
+        }, cookieSecret, 'state'), {path: '/'});
         const url = new URL(`https://app.example/auth/callback?code=new-code&state=${state}`);
 
         await oidc.handleCallback({cookies, url, request: new Request(url), locals: {}});
@@ -482,7 +482,7 @@ describe('OIDC refresh validation and concurrency', () => {
             endpoints
         });
         const cookies = createCookiesWithValues({
-            oidc_session: serializeSignedCookie({id: 'session-1'}, cookieSecret)
+            oidc_session: serializeSignedCookie({id: 'session-1'}, cookieSecret, 'session-reference')
         });
 
         await expect(oidc.getSession({cookies})).resolves.toMatchObject({tokens: {accessToken: 'old-access'}});
@@ -554,7 +554,7 @@ describe('OIDC refresh validation and concurrency', () => {
             endpoints
         });
         const cookies = createCookiesWithValues({
-            oidc_session: serializeSignedCookie({id: 'session-1'}, cookieSecret)
+            oidc_session: serializeSignedCookie({id: 'session-1'}, cookieSecret, 'session-reference')
         });
 
         const reading = oidc.getSession({cookies});
@@ -593,7 +593,7 @@ describe('OIDC refresh validation and concurrency', () => {
             endpoints
         });
         const cookies = createCookiesWithValues({
-            oidc_session: serializeSignedCookie({id: 'session-1'}, cookieSecret)
+            oidc_session: serializeSignedCookie({id: 'session-1'}, cookieSecret, 'session-reference')
         });
 
         const reading = oidc.getSession({cookies});
@@ -671,7 +671,7 @@ describe('OIDC refresh validation and concurrency', () => {
         };
         const first = createOIDC(options);
         const second = createOIDC(options);
-        const cookieValue = serializeSignedCookie({id: 'session-1'}, cookieSecret);
+        const cookieValue = serializeSignedCookie({id: 'session-1'}, cookieSecret, 'session-reference');
 
         const [firstSession, secondSession] = await Promise.all([
             first.getSession({cookies: createCookiesWithValues({oidc_session: cookieValue})}),
@@ -722,7 +722,7 @@ describe('OIDC refresh validation and concurrency', () => {
         const first = createOIDC(options);
         const second = createOIDC(options);
         const cookies = createCookiesWithValues({
-            oidc_session: serializeSignedCookie({id: 'session-1'}, cookieSecret)
+            oidc_session: serializeSignedCookie({id: 'session-1'}, cookieSecret, 'session-reference')
         });
 
         const refreshing = first.getSession({cookies});
@@ -916,6 +916,7 @@ describe('OIDC back-channel logout validation', () => {
 
         const response = await oidc.handleBackChannelLogout({request} as never);
         expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('no-store');
         expect(revoke).toHaveBeenCalledWith(expect.objectContaining({sub: 'user-1', jti: 'logout-1'}));
     });
 
@@ -986,6 +987,81 @@ describe('OIDC back-channel logout validation', () => {
         expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(2);
         expect(revoke).not.toHaveBeenCalled();
     });
+
+    it('rejects a logout token with an untrusted extra audience', async () => {
+        const signer = await createRsaSigner();
+        const {post, revoke} = backChannelSetup(signer.jwks);
+
+        const token = await signer.sign({...logoutClaims('multi-aud'), aud: ['client-app', 'other-app']}, 'logout+jwt');
+
+        await expect(post(token)).rejects.toMatchObject({
+            status: 400,
+            body: {message: 'logout_token contains an untrusted audience'}
+        });
+        expect(revoke).not.toHaveBeenCalled();
+    });
+
+    it('rejects a logout token authorized for another party', async () => {
+        const signer = await createRsaSigner();
+        const {post, revoke} = backChannelSetup(signer.jwks);
+
+        const token = await signer.sign({...logoutClaims('azp'), azp: 'other-app'}, 'logout+jwt');
+
+        await expect(post(token)).rejects.toMatchObject({
+            status: 400,
+            body: {message: 'Invalid logout_token authorized party'}
+        });
+        expect(revoke).not.toHaveBeenCalled();
+    });
+
+    it('loads keys from the new jwks_uri after refreshed metadata moves it', async () => {
+        const signer = await createRsaSigner();
+        let jwksUri = 'https://identity.example/jwks-a';
+        const fetched: string[] = [];
+        const revoke = vi.fn();
+        const oidc = createOIDC({
+            issuer: 'https://identity.example',
+            clientId: 'client-app',
+            cookieSecret,
+            backChannelLogoutStore: {revoke, isRevoked: () => false},
+            metadataRefreshIntervalSeconds: 0.001,
+            fetch: async (input) => {
+                const url = String(input);
+                fetched.push(url);
+                if (url.endsWith('/.well-known/openid-configuration')) {
+                    return new Response(JSON.stringify({
+                        issuer: 'https://identity.example',
+                        authorization_endpoint: 'https://identity.example/authorize',
+                        token_endpoint: 'https://identity.example/token',
+                        jwks_uri: jwksUri,
+                        id_token_signing_alg_values_supported: ['RS256'],
+                        backchannel_logout_supported: true
+                    }));
+                }
+                if (url.includes('/jwks-')) return new Response(JSON.stringify(signer.jwks));
+                throw new Error(`Unexpected URL ${url}`);
+            }
+        });
+        const post = async (jti: string) =>
+            oidc.handleBackChannelLogout({
+                request: new Request('https://app.example/auth/backchannel-logout', {
+                    method: 'POST',
+                    body: new URLSearchParams({logout_token: await signer.sign(logoutClaims(jti), 'logout+jwt')})
+                })
+            } as never);
+
+        await post('before-move');
+        jwksUri = 'https://identity.example/jwks-b';
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        // Starts the background metadata refresh; the cached metadata still serves this request.
+        await oidc.getMetadata();
+        await vi.waitFor(async () => expect((await oidc.getMetadata()).jwks_uri).toBe(jwksUri));
+        await post('after-move');
+
+        expect(fetched).toContain('https://identity.example/jwks-a');
+        expect(fetched).toContain('https://identity.example/jwks-b');
+        expect(revoke).toHaveBeenCalledTimes(2);
+    });
 });
 
 describe('OIDC session-management re-authentication', () => {
@@ -1024,7 +1100,7 @@ describe('OIDC session-management re-authentication', () => {
         try {
             await handler({
                 cookies: createCookiesWithSession(session),
-                request: new Request(url),
+                request: new Request(url, {headers: {'sec-fetch-site': 'same-origin'}}),
                 url
             } as never);
             expect.fail('Expected authorization redirect');
@@ -1034,6 +1110,30 @@ describe('OIDC session-management re-authentication', () => {
             expect(location.searchParams.get('prompt')).toBe('none');
             expect(location.searchParams.get('id_token_hint')).toBe('original-id-token');
         }
+    });
+
+    it.each([
+        ['a cross-site request', {'sec-fetch-site': 'cross-site'}],
+        ['a request without Sec-Fetch-Site', {}]
+    ])('refuses prompt=none from %s', async (_label, headers) => {
+        const oidc = createOIDC({
+            issuer: session.issuer,
+            clientId: session.clientId,
+            cookieSecret,
+            logger: false,
+            endpoints: {
+                issuer: session.issuer,
+                authorization_endpoint: 'https://identity.example/authorize',
+                token_endpoint: 'https://identity.example/token'
+            }
+        });
+        const cookies = createCookiesWithSession(session);
+        const url = new URL('https://app.example/auth/login?prompt=none');
+
+        await expect(
+            oidc.loginHandler()({cookies, request: new Request(url, {headers}), url} as never)
+        ).rejects.toMatchObject({status: 403});
+        expect(cookies.set).not.toHaveBeenCalled();
     });
 
     it('clears the local session when prompt=none reports that the OP session is gone', async () => {
@@ -1047,8 +1147,8 @@ describe('OIDC session-management re-authentication', () => {
             createdAt: Math.floor(Date.now() / 1000)
         } satisfies OIDCStateCookie;
         const cookies = createCookiesWithValues({
-            oidc_session: serializeSignedCookie(session, cookieSecret),
-            oidc_auth_state: serializeSignedCookie(state, cookieSecret)
+            oidc_session: serializeSignedCookie(session, cookieSecret, 'session'),
+            oidc_auth_state: serializeSignedCookie(state, cookieSecret, 'state')
         });
         const oidc = createOIDC({
             issuer: session.issuer,
@@ -1087,8 +1187,8 @@ describe('OIDC session-management re-authentication', () => {
         } satisfies OIDCStateCookie;
         const newerSession = {...session, nonce: 'new-login-nonce'};
         const cookies = createCookiesWithValues({
-            oidc_session: serializeSignedCookie(newerSession, cookieSecret),
-            oidc_auth_state: serializeSignedCookie(state, cookieSecret)
+            oidc_session: serializeSignedCookie(newerSession, cookieSecret, 'session'),
+            oidc_auth_state: serializeSignedCookie(state, cookieSecret, 'state')
         });
         const oidc = createOIDC({
             issuer: session.issuer,
@@ -1121,8 +1221,8 @@ describe('OIDC session-management re-authentication', () => {
             createdAt: Math.floor(Date.now() / 1000)
         } satisfies OIDCStateCookie;
         const cookies = createCookiesWithValues({
-            oidc_session: serializeSignedCookie(session, cookieSecret),
-            oidc_auth_state: serializeSignedCookie(state, cookieSecret)
+            oidc_session: serializeSignedCookie(session, cookieSecret, 'session'),
+            oidc_auth_state: serializeSignedCookie(state, cookieSecret, 'state')
         });
         const oidc = createOIDC({
             issuer: session.issuer,
@@ -1160,8 +1260,8 @@ describe('OIDC session-management re-authentication', () => {
         } satisfies OIDCStateCookie;
         const newerSession = {...session, nonce: 'new-login-nonce'};
         const cookies = createCookiesWithValues({
-            oidc_session: serializeSignedCookie(newerSession, cookieSecret),
-            oidc_auth_state: serializeSignedCookie(state, cookieSecret)
+            oidc_session: serializeSignedCookie(newerSession, cookieSecret, 'session'),
+            oidc_auth_state: serializeSignedCookie(state, cookieSecret, 'state')
         });
         const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
             const url = String(input);
@@ -1225,6 +1325,26 @@ describe('OIDC callback state recovery', () => {
         await expect(oidc.handleCallback({cookies: createCookies(), url} as never)).rejects.toMatchObject({
             body: {message: 'Invalid or expired callback state'}
         });
+    });
+
+    it('restarts login instead of failing on a state value that is not a valid token', async () => {
+        const oidc = createOIDC({
+            issuer: endpoints.issuer,
+            clientId: 'client-app',
+            cookieSecret,
+            logger: false,
+            endpoints
+        });
+        const cookies = createCookies();
+        const url = new URL('https://app.example/auth/callback?code=abc&state=bad%3Btoken%2Cvalue');
+
+        const err = await oidc.handleCallback({cookies, url} as never).catch((e: unknown) => e);
+
+        expect(isRedirect(err)).toBe(true);
+        expect(cookies.delete).not.toHaveBeenCalledWith(
+            expect.stringContaining(';'),
+            expect.anything()
+        );
     });
 
     it('preserves returnTo across a restart when the state cookie is missing', async () => {

@@ -1,8 +1,8 @@
 import type {CookieOptions, OIDCCookies, OIDCSession, OIDCUserClaims} from './types.js';
-import {parseSignedCookie, serializeSignedCookie} from './utils.js';
+import {type CookieSecrets, isOAuthStateToken, parseSignedCookie, serializeSignedCookie} from './utils.js';
 
 export function createOIDCCookieStore<TIdentity extends OIDCUserClaims = OIDCUserClaims>(
-    cookieSecret: string,
+    cookieSecret: CookieSecrets,
     sessionCookieName: string,
     stateCookieName: string,
     cookieOptions: CookieOptions,
@@ -14,7 +14,10 @@ export function createOIDCCookieStore<TIdentity extends OIDCUserClaims = OIDCUse
     const stateSameSite =
         cookieOptions.sameSite === 'strict' || cookieOptions.sameSite === true ? 'lax' : cookieOptions.sameSite;
     const stateCookiePrefix = `${stateCookieName}.`;
-    const stateName = (token: string) => `${stateCookiePrefix}${token.slice(0, 16)}`;
+    // Only well-formed random tokens may become part of a cookie name; a value
+    // taken from the request with other characters would make Set-Cookie throw.
+    const stateName = (token: string | null | undefined) =>
+        isOAuthStateToken(token) ? `${stateCookiePrefix}${token.slice(0, 16)}` : undefined;
     const assertCookieSize = (name: string, value: string) => {
         if (Buffer.byteLength(`${name}=${value}`, 'utf8') > maxCookieSizeBytes) {
             throw new TypeError(
@@ -25,10 +28,10 @@ export function createOIDCCookieStore<TIdentity extends OIDCUserClaims = OIDCUse
 
     return {
         readSession(cookies) {
-            return parseSignedCookie(cookies.get(sessionCookieName), cookieSecret);
+            return parseSignedCookie<OIDCSession<TIdentity>>(cookies.get(sessionCookieName), cookieSecret, 'session');
         },
         writeSession(cookies, session) {
-            const value = serializeSignedCookie(session, cookieSecret);
+            const value = serializeSignedCookie(session, cookieSecret, 'session');
             assertCookieSize(sessionCookieName, value);
             cookies.set(sessionCookieName, value, cookieOptions);
         },
@@ -36,21 +39,27 @@ export function createOIDCCookieStore<TIdentity extends OIDCUserClaims = OIDCUse
             cookies.delete(sessionCookieName, cookieOptions);
         },
         readSessionReference(cookies) {
-            return parseSignedCookie(cookies.get(sessionCookieName), cookieSecret);
+            return parseSignedCookie(cookies.get(sessionCookieName), cookieSecret, 'session-reference');
         },
         writeSessionReference(cookies, reference) {
-            cookies.set(sessionCookieName, serializeSignedCookie(reference, cookieSecret), cookieOptions);
+            cookies.set(
+                sessionCookieName,
+                serializeSignedCookie(reference, cookieSecret, 'session-reference'),
+                cookieOptions
+            );
         },
         clearSessionReference(cookies) {
             cookies.delete(sessionCookieName, cookieOptions);
         },
         readState(cookies, stateToken) {
-            const transactionValue = stateToken ? cookies.get(stateName(stateToken)) : undefined;
-            return parseSignedCookie(transactionValue ?? cookies.get(stateCookieName), cookieSecret);
+            const name = stateName(stateToken);
+            const transactionValue = name ? cookies.get(name) : undefined;
+            return parseSignedCookie(transactionValue ?? cookies.get(stateCookieName), cookieSecret, 'state');
         },
         writeState(cookies, state) {
             const name = stateName(state.state);
-            const value = serializeSignedCookie(state, cookieSecret);
+            if (!name) throw new TypeError('OIDC state token must be a base64url string');
+            const value = serializeSignedCookie(state, cookieSecret, 'state');
             assertCookieSize(name, value);
             cookies.set(name, value, {
                 ...cookieOptions,
@@ -59,7 +68,8 @@ export function createOIDCCookieStore<TIdentity extends OIDCUserClaims = OIDCUse
             });
         },
         clearState(cookies, stateToken) {
-            if (stateToken) cookies.delete(stateName(stateToken), cookieOptions);
+            const name = stateName(stateToken);
+            if (name) cookies.delete(name, cookieOptions);
             cookies.delete(stateCookieName, cookieOptions);
             if (!stateToken) {
                 for (const cookie of cookies.getAll()) {
@@ -69,4 +79,3 @@ export function createOIDCCookieStore<TIdentity extends OIDCUserClaims = OIDCUse
         }
     };
 }
-import '$app/server';
