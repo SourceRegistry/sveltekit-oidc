@@ -9,6 +9,10 @@ export function createOIDCCookieStore<TIdentity extends OIDCUserClaims = OIDCUse
     stateMaxAgeSeconds: number,
     maxCookieSizeBytes: number
 ): OIDCCookies<TIdentity> {
+    // The provider redirects back to the callback cross-site, so a Strict state
+    // cookie would never be sent and every callback would restart the login.
+    const stateSameSite =
+        cookieOptions.sameSite === 'strict' || cookieOptions.sameSite === true ? 'lax' : cookieOptions.sameSite;
     const stateCookiePrefix = `${stateCookieName}.`;
     const stateName = (token: string) => `${stateCookiePrefix}${token.slice(0, 16)}`;
     const assertCookieSize = (name: string, value: string) => {
@@ -50,6 +54,7 @@ export function createOIDCCookieStore<TIdentity extends OIDCUserClaims = OIDCUse
             assertCookieSize(name, value);
             cookies.set(name, value, {
                 ...cookieOptions,
+                sameSite: stateSameSite,
                 maxAge: stateMaxAgeSeconds
             });
         },

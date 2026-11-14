@@ -90,6 +90,16 @@ describe('encodeOAuthState / decodeOAuthState', () => {
         });
     });
 
+    it('carries the callback restart count through the encrypted state', () => {
+        const state = encodeOAuthState('token-123', '/admin', secret, 1);
+
+        expect(decodeOAuthState(state, secret)).toEqual({token: 'token-123', returnTo: '/admin', restarts: 1});
+        expect(decodeOAuthState(encodeOAuthState('token-123', undefined, secret, 1), secret)).toEqual({
+            token: 'token-123',
+            restarts: 1
+        });
+    });
+
     it('still recovers the token from a bare, pre-upgrade-format state (no embedded returnTo)', () => {
         // A login started right before a version bump that adds this
         // encoding sends a bare random token as `state` - the callback must
@@ -134,6 +144,13 @@ describe('internalRedirectPath', () => {
     it('rejects external redirects', () => {
         expect(internalRedirectPath(event, 'https://attacker.example.test/phish', '/')).toBe('/');
         expect(internalRedirectPath(event, '//attacker.example.test/phish', '/')).toBe('/');
+    });
+
+    it('rejects same-origin paths that normalize to a protocol-relative URL', () => {
+        for (const path of ['/.//attacker.example.test', '/..//attacker.example.test', '/a/..//attacker.example.test']) {
+            expect(internalRedirectPath(event, path, '/')).toBe('/');
+        }
+        expect(internalRedirectPath(event, 'https://app.example.test/.//attacker.example.test', '/')).toBe('/');
     });
 });
 

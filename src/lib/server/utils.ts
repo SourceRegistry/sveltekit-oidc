@@ -79,9 +79,14 @@ export function verifySignedValue(value: string, secret: string) {
  * it to survive the authorization-server round trip. The random token is
  * still compared with the matching transaction cookie by the callback.
  */
-export function encodeOAuthState(token: string, returnTo: string | undefined, secret: string): string {
-    if (!returnTo) return token;
-    return `v3.${serializeSignedCookie({token, returnTo}, secret)}`;
+export function encodeOAuthState(
+    token: string,
+    returnTo: string | undefined,
+    secret: string,
+    restarts = 0
+): string {
+    if (!returnTo && !restarts) return token;
+    return `v3.${serializeSignedCookie({token, returnTo, ...(restarts > 0 ? {restarts} : {})}, secret)}`;
 }
 
 /**
@@ -99,18 +104,28 @@ export function encodeOAuthState(token: string, returnTo: string | undefined, se
  * to send the browser next (see handleCallback's restart-on-mismatch path
  * in index.ts); nothing security-sensitive is decided from it, so a
  * same-origin-only destination recovered without the cookie is fine.
+ *
+ * `restarts` counts how many times the callback has already restarted the
+ * login for lack of a matching state cookie; it lets the callback stop
+ * instead of looping when the cookie can never come back.
  */
 export function decodeOAuthState(
     raw: string | null | undefined,
     secret: string
-): {token: string | null; returnTo?: string} {
+): {token: string | null; returnTo?: string; restarts?: number} {
     if (!raw) return {token: null};
     if (raw.startsWith('v3.')) {
-        const decoded = parseSignedCookie<{token?: unknown; returnTo?: unknown}>(raw.slice(3), secret);
+        const decoded = parseSignedCookie<{token?: unknown; returnTo?: unknown; restarts?: unknown}>(
+            raw.slice(3),
+            secret
+        );
         if (!decoded || typeof decoded.token !== 'string') return {token: null};
         return {
             token: decoded.token,
-            ...(typeof decoded.returnTo === 'string' ? {returnTo: decoded.returnTo} : {})
+            ...(typeof decoded.returnTo === 'string' ? {returnTo: decoded.returnTo} : {}),
+            ...(Number.isInteger(decoded.restarts) && (decoded.restarts as number) > 0
+                ? {restarts: decoded.restarts as number}
+                : {})
         };
     }
 
@@ -191,6 +206,9 @@ export function internalRedirectPath(event: {url: URL}, pathOrUrl: string | unde
     try {
         const url = new URL(pathOrUrl, event.url);
         if (url.origin !== event.url.origin) return fallback;
+        // Dot segments can normalize to a leading '//' (e.g. '/.//evil.example'),
+        // which browsers resolve as a protocol-relative URL to another host.
+        if (url.pathname.startsWith('//')) return fallback;
 
         return `${url.pathname}${url.search}${url.hash}`;
     } catch {

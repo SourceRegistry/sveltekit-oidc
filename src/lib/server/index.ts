@@ -1,8 +1,8 @@
 import {type Action, type Cookies, error, redirect, type RequestEvent} from '@sveltejs/kit';
 import type {Handle} from '@sveltejs/kit/hooks';
 import {createHash, randomBytes} from 'node:crypto';
-import {fromWeb} from '@sourceregistry/node-jwt/promises';
-import {decode as decodeJwt, verify as verifyJwt, type JWKSResolver} from '@sourceregistry/node-jwt';
+import {fromWeb, verify as verifyJwt} from '@sourceregistry/node-jwt/promises';
+import {decode as decodeJwt, isSupportedAlgorithm, type JWKSResolver} from '@sourceregistry/node-jwt';
 
 import {createOIDCCookieStore} from './cookies.js';
 import {asAuthorizationHeader, createClientSecretJwtAssertion, createPrivateKeyJwtAssertion, fetchJson} from './jwt.js';
@@ -53,6 +53,8 @@ export type * from './types.js';
 export {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
 
 const OIDC_SESSION_REVALIDATION_DEPENDENCY = 'oidc:session';
+/** How many times a callback without a matching state cookie may restart the login. */
+const MAX_CALLBACK_RESTARTS = 1;
 const LOGIN_PROMPTS = new Set<NonNullable<OIDCLoginOptions['prompt']>>(['login', 'consent', 'none', 'select_account']);
 const RESERVED_AUTHORIZATION_PARAMETERS = new Set([
     'client_id',
@@ -125,6 +127,10 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     if (!Number.isFinite(maxCookieSizeBytes) || maxCookieSizeBytes <= 0) {
         throw new TypeError('maxCookieSizeBytes must be a positive finite number');
     }
+    const httpTimeoutMs = options.httpTimeoutMs ?? 10_000;
+    if (!Number.isFinite(httpTimeoutMs) || httpTimeoutMs < 0) {
+        throw new TypeError('httpTimeoutMs must be a non-negative finite number');
+    }
     const sessionStore =
         options.sessionStore === 'memory' ? createInMemorySessionStore<TIdentity>() : options.sessionStore;
     const backChannelLogoutStore =
@@ -142,6 +148,11 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     const clientAuthMethod: OIDCClientAuthMethod =
         options.clientAuthMethod ?? (options.clientSecret ? 'client_secret_basic' : 'none');
     const fetchImpl: typeof fetch = options.fetch ?? fetch;
+    const providerFetch = {
+        fetch: fetchImpl,
+        timeoutMs: httpTimeoutMs,
+        log: (message: string, details?: unknown) => log.warn(message, details)
+    };
 
     const cookieStore = createOIDCCookieStore<TIdentity>(
         options.cookieSecret,
@@ -190,7 +201,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         let delayMs = discoveryRetryInitialDelayMs;
         for (;;) {
             try {
-                return await fetchJson<OIDCDiscoveryDocument>(discoveryUrl, undefined, fetchImpl);
+                return await fetchJson<OIDCDiscoveryDocument>(discoveryUrl, undefined, providerFetch);
             } catch (err) {
                 attempt++;
                 if (!isTransientDiscoveryError(err) || attempt >= discoveryRetryAttempts) {
@@ -407,7 +418,9 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
 
                     return fromWeb(metadata.jwks_uri, {
                         overrideEndpointCheck: true,
-                        fetch: fetchImpl
+                        fetch: fetchImpl,
+                        timeoutMs: httpTimeoutMs,
+                        allowInsecureHttp: options.allowInsecureHttp === true
                     });
                 })
                 .catch((err) => {
@@ -441,48 +454,31 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         if (!header.alg || !algorithms.includes(header.alg as SupportedAlgorithm)) {
             throw error(401, `JWT algorithm '${header.alg ?? 'missing'}' is not allowed`);
         }
-        if (header.typ && verifyOptions.types && !verifyOptions.types.includes(header.typ)) {
-            throw error(401, `JWT type '${header.typ}' is not allowed`);
-        }
-
-        const nodeJwtOptions = {
-            issuer: verifyOptions.issuer,
-            audience: verifyOptions.audience,
-            algorithms,
-            clockSkew: verifyOptions.clockSkew ?? 0,
-            tokenTypes: verifyOptions.types ?? ['JWT']
-        };
-
-        const verifyWithKey = (key: Parameters<typeof verifyJwt>[1]): T => {
-            const result = verifyJwt(token, key, nodeJwtOptions);
-            if (!result.valid) throw new Error(result.error.reason);
-            return result.payload as T;
-        };
 
         try {
+            // HMAC tokens are keyed with the client secret. Everything else is
+            // verified against the provider JWKS: the resolver selects keys by
+            // kid/alg/use, never returns symmetric keys, and re-fetches on an
+            // unknown kid at most once per cooldown.
+            let key: string | JWKSResolver;
             if (header.alg.startsWith('HS')) {
                 if (!options.clientSecret) throw new Error('clientSecret is required for HMAC-signed ID tokens');
-                return verifyWithKey(options.clientSecret);
+                key = options.clientSecret;
+            } else {
+                key = await getJwks();
             }
-
-            const jwks = await getJwks();
-            let keys = header.kid ? [await jwks.key(header.kid)] : await jwks.list();
-            if (header.kid && !keys[0]) {
-                await jwks.refresh();
-                keys = [await jwks.key(header.kid)];
-            }
-            let lastError: unknown;
-            for (const key of keys) {
-                if (!key) continue;
-                try {
-                    return verifyWithKey(key.toKeyObject());
-                } catch (err) {
-                    lastError = err;
-                }
-            }
-            throw lastError ?? new Error('Unable to resolve a signing key from JWKS');
+            const {payload} = await verifyJwt(token, key, {
+                issuer: verifyOptions.issuer,
+                audience: verifyOptions.audience,
+                algorithms,
+                clockSkew: verifyOptions.clockSkew ?? 0,
+                tokenTypes: verifyOptions.types ?? ['JWT']
+            });
+            return payload as T;
         } catch (err) {
-            throw error(401, err instanceof Error ? err.message : 'JWT verification failed');
+            // The reason can reveal expected issuer/audience values; keep it in server logs only.
+            log.debug('JWT verification failed', err instanceof Error ? err.message : err);
+            throw error(401, 'JWT verification failed');
         }
     }
 
@@ -557,7 +553,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 headers: auth.headers,
                 body: auth.body
             },
-            fetchImpl
+            providerFetch
         );
     }
 
@@ -574,7 +570,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 headers: auth.headers,
                 body: auth.body
             },
-            fetchImpl
+            providerFetch
         );
     }
 
@@ -608,26 +604,10 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     }
 
     function idTokenAlgorithms(metadata: OIDCDiscoveryDocument): SupportedAlgorithm[] {
-        const supported = new Set<SupportedAlgorithm>([
-            'HS256',
-            'HS384',
-            'HS512',
-            'RS256',
-            'RS384',
-            'RS512',
-            'ES256',
-            'ES384',
-            'ES512',
-            'ES256K',
-            'PS256',
-            'PS384',
-            'PS512',
-            'EdDSA'
-        ]);
         const configured = options.idTokenSigningAlgorithms ?? metadata.id_token_signing_alg_values_supported;
         if (!configured?.length) return ['RS256'];
         const algorithms = configured.filter((algorithm): algorithm is SupportedAlgorithm =>
-            supported.has(algorithm as SupportedAlgorithm)
+            isSupportedAlgorithm(algorithm)
         );
         if (!algorithms.length)
             throw error(500, 'Provider has no supported ID-token signing algorithm');
@@ -721,7 +701,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                     authorization: `Bearer ${accessToken}`
                 }
             },
-            fetchImpl
+            providerFetch
         );
     }
 
@@ -921,6 +901,14 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     }
 
     async function signIn(event: {cookies: Cookies; url: URL}, loginOptions: OIDCLoginOptions = {}): Promise<never> {
+        return startSignIn(event, loginOptions, 0);
+    }
+
+    async function startSignIn(
+        event: {cookies: Cookies; url: URL},
+        loginOptions: OIDCLoginOptions,
+        restarts: number
+    ): Promise<never> {
         const metadata = await getMetadata();
         const pkce = createPKCEPair();
         // `token` is the value actually compared against the state cookie on
@@ -932,7 +920,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         const token = base64UrlEncode(randomBytes(24));
         const nonce = base64UrlEncode(randomBytes(24));
         const returnTo = internalRedirectPath(event, loginOptions.returnTo ?? options.defaultLoginRedirect, '/');
-        const state = encodeOAuthState(token, returnTo, options.cookieSecret);
+        const state = encodeOAuthState(token, returnTo, options.cookieSecret, restarts);
         const existingSession = loginOptions.prompt === 'none' ? await readPersistedSession(event.cookies) : null;
 
         cookieStore.writeState(event.cookies, {
@@ -1005,10 +993,27 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             // verify a code exchange against), but `returnTo` doesn't have
             // to be lost: it travels encrypted inside `state` itself
             // (see encodeOAuthState), independent of the cookie.
+            //
+            // Restart only once: if the cookie is missing again after a
+            // restart it is not coming back (SameSite/Secure mismatch,
+            // blocked cookies), and with provider SSO another restart would
+            // redirect forever.
+            const restarts = decodedState.restarts ?? 0;
+            if (restarts >= MAX_CALLBACK_RESTARTS) {
+                log.warn(
+                    'Callback state is still missing after restarting login; stopping to avoid a redirect loop. ' +
+                        'Check that the state cookie survives the redirect from the provider (SameSite, Secure, cookie blocking).'
+                );
+                throw error(400, 'Invalid or expired callback state');
+            }
             log.warn('Invalid or expired callback state — restarting login flow', {
                 recoveredReturnTo: decodedState.returnTo !== undefined
             });
-            return signIn(event, decodedState.returnTo !== undefined ? {returnTo: decodedState.returnTo} : undefined);
+            return startSignIn(
+                event,
+                decodedState.returnTo !== undefined ? {returnTo: decodedState.returnTo} : {},
+                restarts + 1
+            );
         }
 
         cookieStore.clearState(event.cookies, decodedState.token);
