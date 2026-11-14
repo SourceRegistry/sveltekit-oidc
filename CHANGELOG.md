@@ -1,3 +1,20 @@
+# [4.0.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v3.0.3...v4.0.0) (2026-11-14)
+
+
+* feat!: upgrade to node-jwt 2 and harden provider handling ([7f1ebd8](https://github.com/SourceRegistry/sveltekit-oidc/commit/7f1ebd8b63d4cb40ddd1cdfe2b44b74224bea809))
+
+
+### BREAKING CHANGES
+
+* node-jwt 2 rejects HMAC keys shorter than the hash output
+and RSA keys under 2048 bits. client_secret_jwt and HS-signed ID tokens
+now require a client secret of at least 32/48/64 bytes for
+HS256/HS384/HS512. Provider failures now surface generic error messages
+(details are logged), and provider requests time out after 10 seconds by
+default.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 ## [3.0.3](https://github.com/SourceRegistry/sveltekit-oidc/compare/v3.0.2...v3.0.3) (2026-10-08)
 
 
