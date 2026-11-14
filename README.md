@@ -400,6 +400,11 @@ lock implementation and its timeout for your provider's response times.
   `sub` alone revokes that user's sessions. Revocations expire and do not revoke later logins permanently.
 - Local session clearing does not depend on provider discovery being available.
 - Client authentication supports `none`, `client_secret_basic`, `client_secret_post`, `client_secret_jwt`, and `private_key_jwt`.
+- HMAC keys must be at least as long as the hash output (RFC 7518 section 3.2): `client_secret_jwt` and
+  HS-signed ID tokens need a client secret of at least 32 bytes for HS256, 48 for HS384, and 64 for HS512.
+  RSA signing keys must be at least 2048 bits.
+- Provider requests (discovery, token, UserInfo, JWKS) time out after `httpTimeoutMs` (default 10 seconds).
+  Provider error details are written to the logger and are never shown on error pages.
 
 Application code can normalize provider-specific data in `resolveIdentity`, but cannot replace the
 validated ID token claims used by the protocol implementation.

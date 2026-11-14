@@ -918,6 +918,74 @@ describe('OIDC back-channel logout validation', () => {
         expect(response.status).toBe(200);
         expect(revoke).toHaveBeenCalledWith(expect.objectContaining({sub: 'user-1', jti: 'logout-1'}));
     });
+
+    const backChannelSetup = (jwks: unknown) => {
+        const revoke = vi.fn();
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+            if (String(input).endsWith('/jwks')) return new Response(JSON.stringify(jwks));
+            throw new Error(`Unexpected URL ${String(input)}`);
+        });
+        const oidc = createOIDC({
+            issuer: 'https://identity.example',
+            clientId: 'client-app',
+            cookieSecret,
+            backChannelLogoutStore: {revoke, isRevoked: () => false},
+            fetch: fetchImpl,
+            endpoints: {
+                issuer: 'https://identity.example',
+                authorization_endpoint: 'https://identity.example/authorize',
+                token_endpoint: 'https://identity.example/token',
+                jwks_uri: 'https://identity.example/jwks',
+                id_token_signing_alg_values_supported: ['RS256'],
+                backchannel_logout_supported: true
+            }
+        });
+        const post = (logoutToken: string) =>
+            oidc.handleBackChannelLogout({
+                request: new Request('https://app.example/auth/backchannel-logout', {
+                    method: 'POST',
+                    body: new URLSearchParams({logout_token: logoutToken})
+                })
+            } as never);
+        return {revoke, fetchImpl, post};
+    };
+    const logoutClaims = (jti: string) => {
+        const now = Math.floor(Date.now() / 1000);
+        return {
+            iss: 'https://identity.example',
+            aud: 'client-app',
+            sub: 'user-1',
+            iat: now,
+            exp: now + 60,
+            jti,
+            events: {'http://schemas.openid.net/event/backchannel-logout': {}}
+        };
+    };
+
+    it('matches the logout token typ case-insensitively with an application/ prefix', async () => {
+        const signer = await createRsaSigner();
+        const {post, revoke} = backChannelSetup(signer.jwks);
+
+        const response = await post(await signer.sign(logoutClaims('logout-typ'), 'application/Logout+JWT'));
+
+        expect(response.status).toBe(200);
+        expect(revoke).toHaveBeenCalledWith(expect.objectContaining({jti: 'logout-typ'}));
+    });
+
+    it('does not re-fetch the JWKS for every token with an unknown kid', async () => {
+        const signer = await createRsaSigner();
+        const {privateKey} = generateKeyPairSync('rsa', {modulusLength: 2048});
+        const {post, fetchImpl, revoke} = backChannelSetup(signer.jwks);
+
+        for (let i = 0; i < 5; i++) {
+            const forged = sign(logoutClaims(`forged-${i}`), privateKey, {alg: 'RS256', kid: `unknown-${i}`, typ: 'logout+jwt'});
+            await expect(post(forged)).rejects.toMatchObject({status: 401, body: {message: 'JWT verification failed'}});
+        }
+
+        // Initial load plus at most one cooldown-limited re-fetch, not one per request.
+        expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(2);
+        expect(revoke).not.toHaveBeenCalled();
+    });
 });
 
 describe('OIDC session-management re-authentication', () => {
@@ -1210,6 +1278,53 @@ describe('OIDC callback state recovery', () => {
             expect(restartedState).not.toBe(capturedState);
             expect(decodeOAuthState(restartedState, cookieSecret).returnTo).toBe('/admin/clients');
         }
+    });
+
+    it('stops restarting instead of looping when the state cookie never comes back', async () => {
+        const oidc = createOIDC({
+            issuer: endpoints.issuer,
+            clientId: 'client-app',
+            cookieSecret,
+            endpoints
+        });
+        const callback = async (state: string) => {
+            const url = new URL(`https://app.example/auth/callback?code=auth-code&state=${encodeURIComponent(state)}`);
+            return oidc.handleCallback({cookies: createCookies(), url} as never);
+        };
+
+        // First callback without a cookie restarts the login once...
+        const restart = await callback('not-a-real-state').catch((err) => err);
+        expect(isRedirect(restart)).toBe(true);
+        const restartedState = new URL(restart.location).searchParams.get('state')!;
+        expect(decodeOAuthState(restartedState, cookieSecret).restarts).toBe(1);
+
+        // ...and when the cookie is missing again, it fails instead of redirecting forever.
+        await expect(callback(restartedState)).rejects.toMatchObject({
+            status: 400,
+            body: {message: 'Invalid or expired callback state'}
+        });
+    });
+
+    it('keeps the state cookie SameSite=Lax even when session cookies are Strict', async () => {
+        const oidc = createOIDC({
+            issuer: endpoints.issuer,
+            clientId: 'client-app',
+            cookieSecret,
+            cookieOptions: {sameSite: 'strict'},
+            endpoints
+        });
+        const cookies = createCookies();
+        const loginUrl = new URL('https://app.example/auth/login');
+
+        await expect(
+            Promise.resolve(oidc.loginHandler()({cookies, request: new Request(loginUrl), url: loginUrl} as never))
+        ).rejects.toSatisfy(isRedirect);
+
+        expect(cookies.set).toHaveBeenCalledWith(
+            expect.stringMatching(/^oidc_auth_state\./),
+            expect.any(String),
+            expect.objectContaining({sameSite: 'lax'})
+        );
     });
 
     it('falls back to defaultLoginRedirect only when no returnTo can be recovered at all', async () => {

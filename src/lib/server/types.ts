@@ -1,24 +1,12 @@
 import type {Action, Cookies, RequestEvent} from '@sveltejs/kit';
 import type {Handle} from '@sveltejs/kit/hooks';
 import type {KeyObject} from 'node:crypto';
+import type {SupportedAlgorithm} from '@sourceregistry/node-jwt';
 
 export type MaybePromise<T> = Promise<T> | T;
 
-export type SupportedAlgorithm =
-    | 'HS256'
-    | 'HS384'
-    | 'HS512'
-    | 'RS256'
-    | 'RS384'
-    | 'RS512'
-    | 'ES256'
-    | 'ES384'
-    | 'ES512'
-    | 'ES256K'
-    | 'PS256'
-    | 'PS384'
-    | 'PS512'
-    | 'EdDSA';
+/** JWS algorithms implemented by `@sourceregistry/node-jwt`. */
+export type {SupportedAlgorithm};
 
 export type OIDCDiscoveryDocument = {
     issuer: string;
@@ -295,6 +283,13 @@ export type OIDCOptions<TIdentity extends OIDCUserClaims = OIDCUserClaims, TRequ
      * TLS verification in production.
      */
     fetch?: typeof fetch;
+    /**
+     * Timeout in milliseconds for each request to the provider (discovery,
+     * token, userinfo, JWKS), including reading the response body. A timed-out
+     * request fails with status 504 and is treated as a transient failure.
+     * Defaults to 10000. Set to 0 to disable.
+     */
+    httpTimeoutMs?: number;
     /**
      * Controls retries for the initial (uncached) discovery document fetch,
      * so a slow-starting identity provider — e.g. a 503 while it boots, or a
