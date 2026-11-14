@@ -125,8 +125,8 @@ describe('createInMemorySessionStore', () => {
                 tokenType: 'Bearer',
                 scope: ['openid']
             },
-            createdAt: 0,
-            refreshedAt: 0
+            createdAt: Math.floor(Date.now() / 1000),
+            refreshedAt: Math.floor(Date.now() / 1000)
         };
 
         await store.set('session-1', session);
@@ -134,6 +134,48 @@ describe('createInMemorySessionStore', () => {
 
         await store.delete('session-1');
         await expect(store.get('session-1')).resolves.toBeNull();
+    });
+
+    const sessionCreatedAt = (createdAt: number) => ({
+        issuer: 'https://issuer.example',
+        clientId: 'client',
+        sub: 'user-1',
+        groups: [],
+        idTokenClaims: {sub: 'user-1'},
+        identity: {sub: 'user-1'},
+        tokens: {accessToken: 'access', tokenType: 'Bearer', scope: ['openid']},
+        createdAt,
+        refreshedAt: createdAt
+    });
+
+    it('drops sessions older than maxAgeSeconds', async () => {
+        const store = createInMemorySessionStore({maxAgeSeconds: 60});
+        const now = Math.floor(Date.now() / 1000);
+
+        await store.set('expired', sessionCreatedAt(now - 61));
+        await store.set('current', sessionCreatedAt(now));
+
+        await expect(store.get('expired')).resolves.toBeNull();
+        await expect(store.get('current')).resolves.toMatchObject({createdAt: now});
+    });
+
+    it('evicts the least recently written session beyond maxEntries', async () => {
+        const store = createInMemorySessionStore({maxEntries: 2});
+        const now = Math.floor(Date.now() / 1000);
+
+        await store.set('evict-a', sessionCreatedAt(now));
+        await store.set('evict-b', sessionCreatedAt(now));
+        await store.set('evict-a', sessionCreatedAt(now));
+        await store.set('evict-c', sessionCreatedAt(now));
+
+        await expect(store.get('evict-b')).resolves.toBeNull();
+        await expect(store.get('evict-a')).resolves.not.toBeNull();
+        await expect(store.get('evict-c')).resolves.not.toBeNull();
+    });
+
+    it('rejects invalid limits', () => {
+        expect(() => createInMemorySessionStore({maxAgeSeconds: 0})).toThrow(TypeError);
+        expect(() => createInMemorySessionStore({maxEntries: 1.5})).toThrow(TypeError);
     });
 });
 import '$app/server';

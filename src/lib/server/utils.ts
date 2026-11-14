@@ -3,6 +3,26 @@ import {createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, t
 
 import type {CookieOptions, OIDCPublicSession, OIDCSession, OIDCUserClaims} from './types.js';
 
+/** One cookie secret, or several for rotation: the first encrypts, all are tried when decrypting. */
+export type CookieSecrets = string | readonly string[];
+
+/**
+ * What an encrypted value is for. It is bound into the ciphertext as additional
+ * authenticated data, so a value issued for one purpose cannot be replayed as another.
+ */
+export type CookiePurpose = 'session' | 'session-reference' | 'state' | 'oauth-state';
+
+/** Random tokens are base64url; anything else from a request is never used in a cookie name. */
+const OAUTH_STATE_TOKEN = /^[A-Za-z0-9_-]{1,128}$/;
+
+export function isOAuthStateToken(value: unknown): value is string {
+    return typeof value === 'string' && OAUTH_STATE_TOKEN.test(value);
+}
+
+export function cookieSecretList(secret: CookieSecrets): readonly string[] {
+    return typeof secret === 'string' ? [secret] : secret;
+}
+
 export function base64UrlEncode(value: string | Uint8Array): string {
     const buffer = typeof value === 'string' ? Buffer.from(value, 'utf8') : Buffer.from(value);
     return buffer.toString('base64url');
@@ -54,20 +74,19 @@ export function createSignedValue(value: string, secret: string) {
     return `${value}.${mac}`;
 }
 
-export function verifySignedValue(value: string, secret: string) {
+export function verifySignedValue(value: string, secret: CookieSecrets) {
     const lastDot = value.lastIndexOf('.');
     if (lastDot === -1) return null;
 
     const payload = value.slice(0, lastDot);
-    const signature = value.slice(lastDot + 1);
-    const expected = createHmac('sha256', secret).update(payload).digest();
-    const actual = Buffer.from(signature, 'base64url');
+    const actual = Buffer.from(value.slice(lastDot + 1), 'base64url');
 
-    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-        return null;
+    for (const candidate of cookieSecretList(secret)) {
+        const expected = createHmac('sha256', candidate).update(payload).digest();
+        if (expected.length === actual.length && timingSafeEqual(expected, actual)) return payload;
     }
 
-    return payload;
+    return null;
 }
 
 /**
@@ -82,11 +101,11 @@ export function verifySignedValue(value: string, secret: string) {
 export function encodeOAuthState(
     token: string,
     returnTo: string | undefined,
-    secret: string,
+    secret: CookieSecrets,
     restarts = 0
 ): string {
     if (!returnTo && !restarts) return token;
-    return `v3.${serializeSignedCookie({token, returnTo, ...(restarts > 0 ? {restarts} : {})}, secret)}`;
+    return `v3.${serializeSignedCookie({token, returnTo, ...(restarts > 0 ? {restarts} : {})}, secret, 'oauth-state')}`;
 }
 
 /**
@@ -108,18 +127,22 @@ export function encodeOAuthState(
  * `restarts` counts how many times the callback has already restarted the
  * login for lack of a matching state cookie; it lets the callback stop
  * instead of looping when the cookie can never come back.
+ *
+ * The returned `token` is always a base64url string (or null), because it is
+ * used to build the transaction cookie name.
  */
 export function decodeOAuthState(
     raw: string | null | undefined,
-    secret: string
+    secret: CookieSecrets
 ): {token: string | null; returnTo?: string; restarts?: number} {
     if (!raw) return {token: null};
     if (raw.startsWith('v3.')) {
         const decoded = parseSignedCookie<{token?: unknown; returnTo?: unknown; restarts?: unknown}>(
             raw.slice(3),
-            secret
+            secret,
+            'oauth-state'
         );
-        if (!decoded || typeof decoded.token !== 'string') return {token: null};
+        if (!decoded || !isOAuthStateToken(decoded.token)) return {token: null};
         return {
             token: decoded.token,
             ...(typeof decoded.returnTo === 'string' ? {returnTo: decoded.returnTo} : {}),
@@ -130,9 +153,10 @@ export function decodeOAuthState(
     }
 
     const separator = raw.indexOf('.');
-    if (separator === -1) return {token: raw};
+    if (separator === -1) return {token: isOAuthStateToken(raw) ? raw : null};
 
     const token = raw.slice(0, separator);
+    if (!isOAuthStateToken(token)) return {token: null};
     const signedReturnTo = raw.slice(separator + 1);
     const encodedReturnTo = verifySignedValue(signedReturnTo, secret);
     if (!encodedReturnTo) return {token};
@@ -151,31 +175,61 @@ function cookieEncryptionKey(secret: string) {
     return createHash('sha256').update(`sveltekit-oidc-cookie:${secret}`).digest();
 }
 
-export function serializeSignedCookie(payload: unknown, secret: string) {
+function cookieAad(purpose: CookiePurpose) {
+    return Buffer.from(`sveltekit-oidc:${purpose}`, 'utf8');
+}
+
+/**
+ * Encrypts a payload with AES-256-GCM under the first cookie secret, binding
+ * `purpose` as additional authenticated data (format `v3`).
+ */
+export function serializeSignedCookie(payload: unknown, secret: CookieSecrets, purpose: CookiePurpose) {
+    const [current] = cookieSecretList(secret);
+    if (!current) throw new TypeError('At least one cookie secret is required');
     const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', cookieEncryptionKey(secret), iv);
+    const cipher = createCipheriv('aes-256-gcm', cookieEncryptionKey(current), iv);
+    cipher.setAAD(cookieAad(purpose));
     const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
 
-    return `v2.${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
+    return `v3.${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
 }
 
-export function parseSignedCookie<T>(value: string | undefined, secret: string): T | null {
+/**
+ * Decrypts a value written by serializeSignedCookie for the same `purpose`,
+ * trying each cookie secret in turn. Values in the earlier `v2` format, which
+ * carry no purpose, stay readable so existing sessions survive the upgrade;
+ * new values are always written as `v3`.
+ */
+export function parseSignedCookie<T>(
+    value: string | undefined,
+    secret: CookieSecrets,
+    purpose: CookiePurpose
+): T | null {
     if (!value) return null;
 
     const parts = value.split('.');
-    if (parts.length !== 4 || parts[0] !== 'v2') return null;
+    if (parts.length !== 4 || (parts[0] !== 'v3' && parts[0] !== 'v2')) return null;
+    const [version, iv, tag, ciphertext] = parts;
 
-    try {
-        const [, iv, tag, ciphertext] = parts;
-        const decipher = createDecipheriv('aes-256-gcm', cookieEncryptionKey(secret), Buffer.from(iv, 'base64url'));
-        decipher.setAuthTag(Buffer.from(tag, 'base64url'));
-        const plaintext = Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64url')), decipher.final()]);
+    for (const candidate of cookieSecretList(secret)) {
+        try {
+            const decipher = createDecipheriv(
+                'aes-256-gcm',
+                cookieEncryptionKey(candidate),
+                Buffer.from(iv, 'base64url')
+            );
+            if (version === 'v3') decipher.setAAD(cookieAad(purpose));
+            decipher.setAuthTag(Buffer.from(tag, 'base64url'));
+            const plaintext = Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64url')), decipher.final()]);
 
-        return JSON.parse(plaintext.toString('utf8')) as T;
-    } catch {
-        return null;
+            return JSON.parse(plaintext.toString('utf8')) as T;
+        } catch {
+            // Wrong key, wrong purpose, or tampered value: try the next secret.
+        }
     }
+
+    return null;
 }
 
 export function buildCookieOptions(options?: Partial<CookieOptions>): CookieOptions {
@@ -216,6 +270,25 @@ export function internalRedirectPath(event: {url: URL}, pathOrUrl: string | unde
     }
 }
 
+/**
+ * Checks `aud` and `azp` as for an ID token (OIDC Core 3.1.3.7 steps 3-5):
+ * the client must be an audience, every other audience must be explicitly
+ * trusted, and a present `azp` must be the client.
+ */
+export function findAudienceProblem(
+    claims: {aud?: unknown; azp?: unknown},
+    clientId: string,
+    trustedAudiences: string[] = []
+): 'audience' | 'authorized_party' | undefined {
+    const audiences = Array.isArray(claims.aud) ? claims.aud : claims.aud ? [claims.aud] : [];
+    const trusted = new Set([clientId, ...trustedAudiences]);
+    if (!audiences.includes(clientId) || audiences.some((audience) => !trusted.has(audience))) {
+        return 'audience';
+    }
+    if (claims.azp !== undefined && claims.azp !== clientId) return 'authorized_party';
+    return undefined;
+}
+
 export function validateIdTokenClaims(
     claims: OIDCUserClaims,
     nonce: string | undefined,
@@ -236,14 +309,9 @@ export function validateIdTokenClaims(
         throw error(401, 'id_token subject is required');
     }
     if (clientId) {
-        const audiences = Array.isArray(claims.aud) ? claims.aud : claims.aud ? [claims.aud] : [];
-        const trusted = new Set([clientId, ...trustedAudiences]);
-        if (!audiences.includes(clientId) || audiences.some((audience) => !trusted.has(audience))) {
-            throw error(401, 'id_token contains an untrusted audience');
-        }
-        if (claims.azp !== undefined && claims.azp !== clientId) {
-            throw error(401, 'Invalid id_token authorized party');
-        }
+        const problem = findAudienceProblem(claims, clientId, trustedAudiences);
+        if (problem === 'audience') throw error(401, 'id_token contains an untrusted audience');
+        if (problem === 'authorized_party') throw error(401, 'Invalid id_token authorized party');
     }
 }
 

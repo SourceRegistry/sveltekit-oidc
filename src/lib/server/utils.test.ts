@@ -1,3 +1,4 @@
+import {createCipheriv, createHash, randomBytes} from 'node:crypto';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -5,6 +6,7 @@ import {
     createSignedValue,
     decodeOAuthState,
     encodeOAuthState,
+    findAudienceProblem,
     internalRedirectPath,
     normalizeScope,
     parseSignedCookie,
@@ -42,34 +44,64 @@ describe('collectGroups', () => {
 describe('signed cookie helpers', () => {
     it('roundtrips payloads', () => {
         const secret = 'test-secret';
-        const value = serializeSignedCookie({sub: 'user-1', groups: ['admin']}, secret);
+        const value = serializeSignedCookie({sub: 'user-1', groups: ['admin']}, secret, 'session');
 
-        expect(parseSignedCookie<{sub: string; groups: string[]}>(value, secret)).toEqual({
+        expect(parseSignedCookie<{sub: string; groups: string[]}>(value, secret, 'session')).toEqual({
             sub: 'user-1',
             groups: ['admin']
         });
     });
 
     it('does not expose plaintext payload data', () => {
-        const value = serializeSignedCookie({refreshToken: 'secret-refresh-token'}, 'test-secret');
+        const value = serializeSignedCookie({refreshToken: 'secret-refresh-token'}, 'test-secret', 'session');
 
         expect(value).not.toContain('secret-refresh-token');
-        expect(value.startsWith('v2.')).toBe(true);
+        expect(value.startsWith('v3.')).toBe(true);
     });
 
     it('rejects tampered values', () => {
         const secret = 'test-secret';
-        const value = serializeSignedCookie({sub: 'user-1'}, secret);
+        const value = serializeSignedCookie({sub: 'user-1'}, secret, 'session');
         const tampered = `${value}x`;
 
-        expect(parseSignedCookie(tampered, secret)).toBeNull();
+        expect(parseSignedCookie(tampered, secret, 'session')).toBeNull();
+    });
+
+    it('binds a value to its purpose', () => {
+        const secret = 'test-secret';
+        const value = serializeSignedCookie({id: 'session-1'}, secret, 'session-reference');
+
+        expect(parseSignedCookie(value, secret, 'session-reference')).toEqual({id: 'session-1'});
+        expect(parseSignedCookie(value, secret, 'session')).toBeNull();
+        expect(parseSignedCookie(value, secret, 'state')).toBeNull();
+    });
+
+    it('encrypts with the first secret and decrypts with any listed secret', () => {
+        const oldValue = serializeSignedCookie({sub: 'user-1'}, 'old-secret', 'session');
+        const rotated = ['new-secret', 'old-secret'];
+        const newValue = serializeSignedCookie({sub: 'user-2'}, rotated, 'session');
+
+        expect(parseSignedCookie(oldValue, rotated, 'session')).toEqual({sub: 'user-1'});
+        expect(parseSignedCookie(newValue, 'new-secret', 'session')).toEqual({sub: 'user-2'});
+        expect(parseSignedCookie(newValue, 'old-secret', 'session')).toBeNull();
+    });
+
+    it('still reads values written in the previous v2 format', () => {
+        const secret = 'test-secret';
+        const key = createHash('sha256').update(`sveltekit-oidc-cookie:${secret}`).digest();
+        const iv = randomBytes(12);
+        const cipher = createCipheriv('aes-256-gcm', key, iv);
+        const ciphertext = Buffer.concat([cipher.update(JSON.stringify({sub: 'user-1'}), 'utf8'), cipher.final()]);
+        const legacy = `v2.${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${ciphertext.toString('base64url')}`;
+
+        expect(parseSignedCookie(legacy, secret, 'session')).toEqual({sub: 'user-1'});
     });
 
     it('rejects legacy signed-only values', () => {
         const secret = 'test-secret';
         const value = createSignedValue(Buffer.from(JSON.stringify({sub: 'user-1'})).toString('base64url'), secret);
 
-        expect(parseSignedCookie(value, secret)).toBeNull();
+        expect(parseSignedCookie(value, secret, 'session')).toBeNull();
     });
 });
 
@@ -107,6 +139,12 @@ describe('encodeOAuthState / decodeOAuthState', () => {
         expect(decodeOAuthState('token-123', secret)).toEqual({
             token: 'token-123'
         });
+    });
+
+    it('never returns a token that cannot be used in a cookie name', () => {
+        expect(decodeOAuthState('bad token;', secret)).toEqual({token: null});
+        expect(decodeOAuthState('bad token;.signature', secret)).toEqual({token: null});
+        expect(decodeOAuthState(encodeOAuthState('bad token;', '/admin', secret), secret)).toEqual({token: null});
     });
 
     it('rejects a tampered encrypted state', () => {
@@ -151,6 +189,21 @@ describe('internalRedirectPath', () => {
             expect(internalRedirectPath(event, path, '/')).toBe('/');
         }
         expect(internalRedirectPath(event, 'https://app.example.test/.//attacker.example.test', '/')).toBe('/');
+    });
+});
+
+describe('findAudienceProblem', () => {
+    it('requires the client and only explicitly trusted extra audiences', () => {
+        expect(findAudienceProblem({aud: 'client'}, 'client')).toBeUndefined();
+        expect(findAudienceProblem({aud: ['client', 'api']}, 'client', ['api'])).toBeUndefined();
+        expect(findAudienceProblem({aud: ['client', 'other']}, 'client')).toBe('audience');
+        expect(findAudienceProblem({aud: 'other'}, 'client')).toBe('audience');
+        expect(findAudienceProblem({}, 'client')).toBe('audience');
+    });
+
+    it('rejects an authorized party other than the client', () => {
+        expect(findAudienceProblem({aud: 'client', azp: 'client'}, 'client')).toBeUndefined();
+        expect(findAudienceProblem({aud: 'client', azp: 'other'}, 'client')).toBe('authorized_party');
     });
 });
 

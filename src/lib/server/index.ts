@@ -36,8 +36,10 @@ import {
     buildCookieOptions,
     collectGroups,
     createPKCEPair,
+    cookieSecretList,
     decodeOAuthState,
     encodeOAuthState,
+    findAudienceProblem,
     internalRedirectPath,
     normalizeIssuer,
     normalizeScope,
@@ -51,6 +53,7 @@ import {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from '
 
 export type * from './types.js';
 export {createInMemoryBackChannelLogoutStore, createInMemorySessionStore} from './store.js';
+export type {InMemorySessionStoreOptions} from './store.js';
 
 const OIDC_SESSION_REVALIDATION_DEPENDENCY = 'oidc:session';
 /** How many times a callback without a matching state cookie may restart the login. */
@@ -107,7 +110,11 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     const clockSkewSeconds = options.clockSkewSeconds ?? 30;
     const refreshToleranceSeconds = options.refreshToleranceSeconds ?? 30;
     const sessionMaxAgeSeconds = options.sessionMaxAgeSeconds ?? 60 * 60 * 8;
-    if (Buffer.byteLength(options.cookieSecret, 'utf8') < 32) {
+    const cookieSecrets = cookieSecretList(options.cookieSecret);
+    if (!cookieSecrets.length) {
+        throw new TypeError('cookieSecret must contain at least one secret');
+    }
+    if (cookieSecrets.some((secret) => typeof secret !== 'string' || Buffer.byteLength(secret, 'utf8') < 32)) {
         throw new TypeError('cookieSecret must contain at least 32 bytes of entropy');
     }
     if (!Number.isFinite(clockSkewSeconds) || clockSkewSeconds < 0) {
@@ -132,7 +139,9 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         throw new TypeError('httpTimeoutMs must be a non-negative finite number');
     }
     const sessionStore =
-        options.sessionStore === 'memory' ? createInMemorySessionStore<TIdentity>() : options.sessionStore;
+        options.sessionStore === 'memory'
+            ? createInMemorySessionStore<TIdentity>({maxAgeSeconds: sessionMaxAgeSeconds})
+            : options.sessionStore;
     const backChannelLogoutStore =
         options.backChannelLogoutStore === 'memory'
             ? createInMemoryBackChannelLogoutStore<TIdentity>({
@@ -155,7 +164,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     };
 
     const cookieStore = createOIDCCookieStore<TIdentity>(
-        options.cookieSecret,
+        cookieSecrets,
         sessionCookieName,
         stateCookieName,
         cookieOptions,
@@ -168,7 +177,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     const invalidatedRefreshes = new Set<string>();
 
     let metadataPromise: Promise<OIDCDiscoveryDocument> | undefined;
-    let jwksPromise: Promise<JWKSResolver> | undefined;
+    let jwksCache: {uri: string; resolver: Promise<JWKSResolver>} | undefined;
     let cachedMetadata: OIDCDiscoveryDocument | undefined;
     let metadataFetchedAt = 0;
     let metadataNextRefreshAttemptAt = 0;
@@ -409,27 +418,29 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     }
 
     async function getJwks() {
-        if (!jwksPromise) {
-            jwksPromise = getMetadata()
-                .then((metadata) => {
-                    if (!metadata.jwks_uri) {
-                        throw error(500, 'OIDC jwks_uri is required to validate id_token values');
-                    }
-
-                    return fromWeb(metadata.jwks_uri, {
-                        overrideEndpointCheck: true,
-                        fetch: fetchImpl,
-                        timeoutMs: httpTimeoutMs,
-                        allowInsecureHttp: options.allowInsecureHttp === true
-                    });
-                })
-                .catch((err) => {
-                    jwksPromise = undefined;
+        const metadata = await getMetadata();
+        if (!metadata.jwks_uri) {
+            throw error(500, 'OIDC jwks_uri is required to validate id_token values');
+        }
+        // A metadata refresh can move the key set; never keep verifying
+        // against keys fetched from a jwks_uri the provider no longer lists.
+        if (jwksCache?.uri !== metadata.jwks_uri) {
+            const entry: NonNullable<typeof jwksCache> = {
+                uri: metadata.jwks_uri,
+                resolver: fromWeb(metadata.jwks_uri, {
+                    overrideEndpointCheck: true,
+                    fetch: fetchImpl,
+                    timeoutMs: httpTimeoutMs,
+                    allowInsecureHttp: options.allowInsecureHttp === true
+                }).catch((err) => {
+                    if (jwksCache === entry) jwksCache = undefined;
                     throw err;
-                });
+                })
+            };
+            jwksCache = entry;
         }
 
-        return jwksPromise;
+        return jwksCache.resolver;
     }
 
     async function verifyJwtWithJwks<T extends Record<string, unknown>>(
@@ -674,6 +685,10 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         ) {
             throw error(400, 'logout_token must contain valid iat, exp, and jti claims');
         }
+        // Back-Channel Logout 1.0 section 2.6 applies the ID token audience rules.
+        const audienceProblem = findAudienceProblem(claims, options.clientId, options.trustedIdTokenAudiences);
+        if (audienceProblem === 'audience') throw error(400, 'logout_token contains an untrusted audience');
+        if (audienceProblem === 'authorized_party') throw error(400, 'Invalid logout_token authorized party');
         const event = claims.events?.['http://schemas.openid.net/event/backchannel-logout'];
         if (!event || typeof event !== 'object' || Array.isArray(event)) {
             throw error(400, 'Invalid logout_token events claim');
@@ -920,7 +935,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
         const token = base64UrlEncode(randomBytes(24));
         const nonce = base64UrlEncode(randomBytes(24));
         const returnTo = internalRedirectPath(event, loginOptions.returnTo ?? options.defaultLoginRedirect, '/');
-        const state = encodeOAuthState(token, returnTo, options.cookieSecret, restarts);
+        const state = encodeOAuthState(token, returnTo, cookieSecrets, restarts);
         const existingSession = loginOptions.prompt === 'none' ? await readPersistedSession(event.cookies) : null;
 
         cookieStore.writeState(event.cookies, {
@@ -967,7 +982,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
     async function handleCallback(event: {url: URL; cookies: Cookies}): Promise<OIDCCallbackResult<TIdentity>> {
         const rawState = event.url.searchParams.get('state');
         const code = event.url.searchParams.get('code');
-        const decodedState = decodeOAuthState(rawState, options.cookieSecret);
+        const decodedState = decodeOAuthState(rawState, cookieSecrets);
         const stateCookie = cookieStore.readState(event.cookies, decodedState.token);
         const now = Math.floor(Date.now() / 1000);
         const stateMatches = Boolean(
@@ -1154,7 +1169,8 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             iat: claims.iat
         });
 
-        return new Response(null, {status: 200});
+        // Back-Channel Logout 1.0 section 2.8: the response must not be cached.
+        return new Response(null, {status: 200, headers: {'Cache-Control': 'no-store'}});
     }
 
     async function requireAuth(event: {url: URL; cookies: RequestEvent['cookies']}, returnTo?: string) {
@@ -1208,6 +1224,16 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
                 requestedPrompt && LOGIN_PROMPTS.has(requestedPrompt as NonNullable<OIDCLoginOptions['prompt']>)
                     ? (requestedPrompt as NonNullable<OIDCLoginOptions['prompt']>)
                     : defaults.prompt;
+            // A failed silent check clears the local session, so another site
+            // must not be able to start one by linking to ?prompt=none. Only
+            // OIDCContext's same-origin iframe may request it.
+            if (
+                requestedPrompt === 'none' &&
+                event.request.headers.get('sec-fetch-site') !== 'same-origin'
+            ) {
+                log.warn('Rejected prompt=none login request that did not come from this origin');
+                throw error(403, 'prompt=none is only allowed from same-origin requests');
+            }
             return signIn(event, {...defaults, returnTo, prompt});
         };
     }
@@ -1220,7 +1246,7 @@ export function createOIDC<TIdentity extends OIDCUserClaims = OIDCUserClaims, TR
             // encodeOAuthState in signIn), so it's no longer directly equal
             // to the bare token stored in the cookie - decode it the same
             // way handleCallback does before comparing.
-            const callbackToken = decodeOAuthState(event.url.searchParams.get('state'), options.cookieSecret).token;
+            const callbackToken = decodeOAuthState(event.url.searchParams.get('state'), cookieSecrets).token;
             const stateCookie = cookieStore.readState(event.cookies, callbackToken);
             const isSilentReauthentication = Boolean(
                 stateCookie?.prompt === 'none' && callbackToken && callbackToken === stateCookie.state

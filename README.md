@@ -27,6 +27,11 @@ declare it in the app's `package.json`:
 {"imports":{"#lib":"./src/lib/index.js","#lib/*":"./src/lib/*"}}
 ```
 
+Import server code from `@sourceregistry/sveltekit-oidc/server` and components from
+`@sourceregistry/sveltekit-oidc/client`. On npm the root entry is the client entry; on JSR, which
+cannot publish Svelte components, the root entry is the server API plus the context helpers, so name
+the subpath explicitly in code shared between both.
+
 The [API reference](https://sourceregistry.github.io/sveltekit-oidc/) lists every option and exported type.
 
 ## Configure
@@ -90,6 +95,14 @@ Replace the placeholder cookie secret before starting the app. `cookieSecret` mu
 
 ```sh
 openssl rand -base64 32
+```
+
+To rotate the secret, pass an array with the new secret first. New cookies are encrypted with the
+first secret and every listed secret is tried when reading, so existing sessions keep working. Remove
+the old secret once `sessionMaxAgeSeconds` has passed:
+
+```ts
+cookieSecret: [OIDC_COOKIE_SECRET, OIDC_COOKIE_SECRET_PREVIOUS],
 ```
 
 Discovery and protocol endpoints must use HTTPS by default. Set `allowInsecureHttp: true` only for
@@ -330,6 +343,21 @@ as `id_token_hint`; a matching End-User refreshes the local session. A definitiv
 different End-User clears the matching local session. Temporary provider failures preserve it for
 retry, and a callback from an older login cannot replace a newer local session. Applications using
 the standard `loginHandler()` and `callbackHandler()` routes do not need an additional endpoint.
+`loginHandler()` accepts `?prompt=none` only from same-origin requests (`Sec-Fetch-Site: same-origin`),
+so another site cannot trigger a silent check that clears the local session.
+
+Session monitoring only works when the browser lets the OP's iframe read the OP's cookies. That holds
+when the OP shares the app's site (for example `auth.example.com` and `app.example.com`); when it is on
+another site, browsers that block third-party cookies make every check report `changed`. The component
+limits the damage:
+
+- A silent re-authentication that gets no answer within 30 seconds keeps the session and stops
+  monitoring on that page, instead of logging the user out.
+- If a check reports `changed` before the iframe has ever reported `unchanged`, shortly after the
+  monitor ended the previous session in the same tab, monitoring is switched off for that page so the
+  user is not logged out after every login. `onDebug` receives `session_monitor_disabled`.
+
+For an OP on another site, prefer `monitorSession={false}` and back-channel logout.
 
 ## Session stores
 
@@ -352,7 +380,15 @@ const sessionStore: OIDCSessionStore<Identity> = {
 ```
 
 Use a shared `backChannelLogoutStore` when back-channel logout must work across multiple instances.
-The built-in `'memory'` stores are intended for local development or single-process deployments.
+The built-in `'memory'` stores are intended for local development or single-process deployments. The
+in-memory session store drops sessions after `sessionMaxAgeSeconds` and keeps at most 10,000 of them by
+default; call `createInMemorySessionStore({maxAgeSeconds, maxEntries})` to change those limits.
+
+A cookie session lives entirely in the browser, so the server cannot end it on its own: `clearSession`
+and logout clear only the cookie of the browser making the request, and a copied cookie stays valid
+until it expires. Use a `sessionStore` when sessions must be revocable from the server (for example
+to sign a user out everywhere), or configure a `backChannelLogoutStore` so provider-initiated logouts
+are honored.
 
 For rotating refresh tokens in a multi-instance deployment, use **both** a shared `sessionStore`
 and a distributed `refreshLock`. The lock serializes refresh and logout by session ID across
@@ -381,7 +417,9 @@ lock implementation and its timeout for your provider's response times.
   tokens may omit nonce as allowed by OIDC Core, but must preserve subject, audiences, authorized
   party, and authentication time.
 - UserInfo `sub` must match the validated ID token subject.
-- Cookie sessions use authenticated encryption.
+- Cookie sessions use authenticated encryption, bound to their purpose: a session, session
+  reference, or login-state value cannot be replayed as another kind. `cookieSecret` accepts several
+  secrets for rotation.
 - Persisted sessions are checked against the configured client ID and issuer before use.
 - A fresh login retires the previous server-stored session ID before issuing a new one.
 - Silent re-authentication keeps a newer local login intact and retains a current session during temporary provider failures.
@@ -398,6 +436,8 @@ lock implementation and its timeout for your provider's response times.
 - Back-channel logout tokens require the logout event, `iat`, `exp`, `jti`, and exactly one or both of
   `sid` and `sub`; `nonce` is rejected. A token with `sid` revokes only that session, while a token with
   `sub` alone revokes that user's sessions. Revocations expire and do not revoke later logins permanently.
+  The token's `aud` and `azp` are checked as for an ID token, and the response is sent with
+  `Cache-Control: no-store`.
 - Local session clearing does not depend on provider discovery being available.
 - Client authentication supports `none`, `client_secret_basic`, `client_secret_post`, `client_secret_jwt`, and `private_key_jwt`.
 - HMAC keys must be at least as long as the hash output (RFC 7518 section 3.2): `client_secret_jwt` and

@@ -12,7 +12,7 @@
 
     import {setOIDCContext} from './context.js';
 	import {getIdlePhase, normalizeIdleDuration} from './idle.js';
-    import {classifySessionMonitorEvent} from './session-monitor.js';
+    import {classifySessionMonitorEvent, createSessionMonitorGuard} from './session-monitor.js';
 
 	type RedirectMode = 'login' | 'logout' | 'provider-logout' | 'reload' | 'none';
 
@@ -88,6 +88,10 @@
     let silentReauthenticationIframe = $state<HTMLIFrameElement | undefined>(undefined);
     let silentReauthenticationUrl = $state<string | undefined>(undefined);
     let silentReauthenticationTimeout: number | undefined;
+    /** Set when session monitoring proved unreliable on this page; the session itself is kept. */
+    let monitorDisabled = $state(false);
+    /** Whether the OP iframe has reported `unchanged` at least once on this page. */
+    let monitorConfirmed = false;
     let status = $state<'authenticated' | 'unauthenticated' | 'expired' | 'revoked'>('unauthenticated');
     let revalidating = $state(false);
     let handledUnauthenticated = $state(false);
@@ -101,6 +105,22 @@
         onDebug?.({type, details});
     }
 
+    function sessionMonitorGuard() {
+        let storage: Storage | undefined;
+        try {
+            storage = window.sessionStorage;
+        } catch {
+            // Storage can be denied in privacy modes; the guard then does nothing.
+        }
+        return createSessionMonitorGuard(storage, `sveltekit-oidc:monitor-logout:${config.issuer}:${config.clientId}`);
+    }
+
+    function disableSessionMonitor(reason: string) {
+        if (monitorDisabled) return;
+        monitorDisabled = true;
+        debug('session_monitor_disabled', {reason});
+    }
+
     const metadata = $derived(config.metadata);
     const resolvedLoginPath = $derived(loginPath ?? config.loginPath ?? '/auth/login');
     const resolvedLogoutPath = $derived(logoutPath ?? config.logoutPath ?? '/auth/logout');
@@ -108,7 +128,7 @@
         config.metadata.check_session_iframe ?? config.checkSessionIframe ?? undefined
     );
     const canMonitorIframe = $derived(
-        Boolean(monitorSession && session?.isAuthenticated && session?.sessionState && iframeUrl)
+        Boolean(monitorSession && !monitorDisabled && session?.isAuthenticated && session?.sessionState && iframeUrl)
     );
 	const effectiveIdleTimeoutMs = $derived(normalizeIdleDuration(idleTimeoutMs));
 	const effectiveIdleWarningMs = $derived(normalizeIdleDuration(idleWarningMs));
@@ -293,6 +313,7 @@
 
         status = 'revoked';
         debug('silent_reauthentication_logged_out');
+        sessionMonitorGuard().recordMonitorLogout();
         await handleRedirect(redirectOnRevoked);
     }
 
@@ -305,8 +326,13 @@
             'none'
         );
         silentReauthenticationTimeout = window.setTimeout(() => {
+            // No answer is not proof of logout: the OP may refuse to be framed or
+            // the browser may block its cookies. Keep the session (its expiry,
+            // refresh, and back-channel logout still apply) and stop monitoring.
             debug('silent_reauthentication_timed_out');
-            void logout(true).then(() => finishSilentReauthentication('logged_out'));
+            silentReauthenticationTimeout = undefined;
+            silentReauthenticationUrl = undefined;
+            disableSessionMonitor('silent_reauthentication_timed_out');
         }, 30_000);
     }
 
@@ -571,8 +597,24 @@
                 debug('iframe_session_error', {origin: event.origin});
                 return;
             }
+            if (result === 'unchanged') {
+                if (!monitorConfirmed) {
+                    monitorConfirmed = true;
+                    // The monitor works in this browser; forget any earlier monitor logout.
+                    sessionMonitorGuard().consumeRecentMonitorLogout();
+                }
+                return;
+            }
             if (result === 'changed') {
                 debug('iframe_session_event', {result, origin: event.origin});
+                // A change reported before the iframe ever confirmed this session,
+                // right after the monitor ended the previous one, means the OP
+                // cannot see its own cookies here. Acting on it would end every
+                // new login again.
+                if (!monitorConfirmed && sessionMonitorGuard().consumeRecentMonitorLogout()) {
+                    disableSessionMonitor('unconfirmed_change_after_monitor_logout');
+                    return;
+                }
                 startSilentReauthentication();
             }
         };
