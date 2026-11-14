@@ -1,3 +1,10 @@
+# [4.1.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v4.0.0...v4.1.0) (2026-11-14)
+
+
+### Features
+
+* harden sessions, cookies and back-channel logout ([6b4987a](https://github.com/SourceRegistry/sveltekit-oidc/commit/6b4987a24d0c78ff5ef440377fc2df6204bc38eb))
+
 # [4.0.0](https://github.com/SourceRegistry/sveltekit-oidc/compare/v3.0.3...v4.0.0) (2026-11-14)
 
 
