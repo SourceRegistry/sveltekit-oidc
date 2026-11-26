@@ -64,7 +64,7 @@
     "@semantic-release/git": "^11.0.1",
     "@semantic-release/npm": "^13.2.0",
     "@sourceregistry/semantic-release-jsr": "^1.1.1",
-    "@sveltejs/adapter-auto": "^8.0.1",
+    "@sveltejs/adapter-auto": "^9.0.0",
     "@sveltejs/kit": "^3.2.0",
     "@sveltejs/package": "^3.0.2",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
